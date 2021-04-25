@@ -139,7 +139,7 @@ Definition bot : t := PTree.empty _.
 
 Lemma get_bot: forall p, get p bot = L.bot.
 Proof.
-  unfold bot, get; intros; simpl. rewrite PTree.gempty. auto.
+ intros. unfold get, bot. rewrite PTree.gempty. auto.
 Qed.
 
 Lemma ge_bot: forall x, ge x bot.
@@ -210,164 +210,1450 @@ Lemma tree_eq_node:
   tree_eq l1 l2 -> tree_eq r1 r2 -> opt_eq o1 o2 ->
   tree_eq (PTree.Node l1 o1 r1) (PTree.Node l2 o2 r2).
 Proof.
-  intros; red; intros. destruct i; simpl; auto.
-Qed.
-
-Lemma tree_eq_node':
-  forall l1 o1 r1 l2 o2 r2,
-  tree_eq l1 l2 -> tree_eq r1 r2 -> opt_eq o1 o2 ->
-  tree_eq (PTree.Node l1 o1 r1) (PTree.Node' l2 o2 r2).
-Proof.
-  intros; red; intros. rewrite PTree.gnode'. apply tree_eq_node; auto.
-Qed.
-
-Lemma tree_eq_node'':
-  forall l1 o1 r1 l2 o2 r2,
-  tree_eq l1 l2 -> tree_eq r1 r2 -> opt_eq o1 o2 ->
-  tree_eq (PTree.Node' l1 o1 r1) (PTree.Node' l2 o2 r2).
-Proof.
-  intros; red; intros. repeat rewrite PTree.gnode'. apply tree_eq_node; auto.
+  intros; red; intros.
+  destruct i.
+ rewrite !PTree.get_xI_Node; auto.
+ rewrite !PTree.get_xO_Node; auto.
+ rewrite !PTree.get_xH_Node; auto.
 Qed.
 
 Hint Resolve opt_beq_correct opt_eq_refl opt_eq_sym
              tree_eq_refl tree_eq_sym
-             tree_eq_node tree_eq_node' tree_eq_node'' : combine.
+             tree_eq_node  : combine.
 
-Inductive changed: Type := Unchanged | Changed (m: PTree.t L.t).
-
-Fixpoint combine_l (m : PTree.t L.t) {struct m} : changed :=
-  match m with
-  | PTree.Leaf =>
-      Unchanged
-  | PTree.Node l o r =>
-      let o' := f o None in
-      match combine_l l, combine_l r with
-      | Unchanged, Unchanged => if opt_beq o' o then Unchanged else Changed (PTree.Node' l o' r)
-      | Unchanged, Changed r' => Changed (PTree.Node' l o' r')
-      | Changed l', Unchanged => Changed (PTree.Node' l' o' r)
-      | Changed l', Changed r' => Changed (PTree.Node' l' o' r')
-      end
-  end.
-
-Lemma combine_l_eq:
-  forall m,
-  tree_eq (match combine_l m with Unchanged => m | Changed m' => m' end)
-          (PTree.xcombine_l f m).
+Lemma tree_eq_Nodes_not_Empty:
+  forall m,  ~ tree_eq (PTree.Nodes m) PTree.Empty.
 Proof.
-  induction m; simpl.
-  auto with combine.
-  destruct (combine_l m1) as [ | l']; destruct (combine_l m2) as [ | r'];
-  auto with combine.
-  case_eq (opt_beq (f o None) o); auto with combine.
+unfold not, tree_eq.
+induction m; intros.
+-
+apply IHm; clear IHm; intro i; specialize (H (xI i)).
+rewrite PTree.gempty in *. apply H.
+-
+apply (H xH).
+-
+apply (H xH).
+-
+apply IHm; clear IHm; intro i; specialize (H (xO i)).
+rewrite PTree.gempty in *. apply H.
+-
+apply IHm1; clear IHm1; intro i; specialize (H (xO i)).
+rewrite PTree.gempty in *. apply H.
+-
+apply IHm; clear IHm; intro i; specialize (H (xO i)).
+rewrite PTree.gempty in *. apply H.
+-
+apply (H xH).
 Qed.
 
-Fixpoint combine_r (m : PTree.t L.t) {struct m} : changed :=
+Inductive changed: Type := Unchanged | Chempty | Changed (m: PTree.tree' L.t).
+
+Fixpoint combine_l (m : PTree.tree' L.t) {struct m} : changed :=
   match m with
-  | PTree.Leaf =>
-      Unchanged
-  | PTree.Node l o r =>
-      let o' := f None o in
-      match combine_r l, combine_r r with
-      | Unchanged, Unchanged => if opt_beq o' o then Unchanged else Changed (PTree.Node' l o' r)
-      | Unchanged, Changed r' => Changed (PTree.Node' l o' r')
-      | Changed l', Unchanged => Changed (PTree.Node' l' o' r)
-      | Changed l', Changed r' => Changed (PTree.Node' l' o' r')
-      end
+  | PTree.Node001 r => match combine_l r with
+                                      | Unchanged => Unchanged
+                                      | Chempty => Chempty
+                                      | Changed r' => Changed (PTree.Node001 r')
+                                      end
+  | PTree.Node010 o => match f (Some o) None with
+                                       | None => Chempty
+                                       | Some o' => if L.beq o' o then Unchanged else Changed (PTree.Node010 o')
+                                       end
+  | PTree.Node011 o r => match f (Some o) None, combine_l r with
+                                         | None, Unchanged => Changed (PTree.Node001 r)
+                                         | None, Chempty => Chempty
+                                         | None, Changed r' => Changed (PTree.Node001 r')
+                                         | Some o', Unchanged => if L.beq o' o then Unchanged else Changed (PTree.Node011 o' r)
+                                         | Some o', Chempty => if L.beq o' o then Changed (PTree.Node010 o) else Changed (PTree.Node010 o')
+                                         | Some o', Changed r' => if L.beq o' o then Changed (PTree.Node011 o r') else Changed (PTree.Node011 o' r')
+                                         end
+  | PTree.Node100 l => match combine_l l with
+                                      | Unchanged => Unchanged
+                                      | Chempty => Chempty
+                                      | Changed l' => Changed (PTree.Node100 l')
+                                      end
+  | PTree.Node101 l r => match combine_l l, combine_l r with
+                                      | Unchanged, Unchanged => Unchanged
+                                      | Unchanged, Chempty => Changed (PTree.Node100 l)
+                                      | Unchanged, Changed r' => Changed (PTree.Node101 l r')
+                                      | Chempty, Unchanged => Changed (PTree.Node001 r)
+                                      | Chempty, Chempty => Chempty
+                                      | Chempty, Changed r' => Changed (PTree.Node001 r')
+                                      | Changed l', Unchanged => Changed (PTree.Node101 l' r)
+                                      | Changed l', Chempty => Changed (PTree.Node100 l')
+                                      | Changed l', Changed r' => Changed (PTree.Node101 l' r')
+                                      end
+  | PTree.Node110 l o => match combine_l l, f (Some o) None with
+                                         | Unchanged, None => Changed (PTree.Node100 l)
+                                         | Unchanged, Some o' => if L.beq o' o then Unchanged else Changed (PTree.Node110 l o')
+                                         | Chempty, None => Chempty
+                                         | Chempty, Some o' => if L.beq o' o then Changed (PTree.Node010 o) else Changed (PTree.Node010 o')
+                                         | Changed l', None => Changed (PTree.Node100 l')
+                                         | Changed l', Some o' => if L.beq o' o then Changed (PTree.Node110 l' o) else Changed (PTree.Node110 l' o')
+                                         end
+  | PTree.Node111 l o r => match combine_l l, f (Some o) None, combine_l r with
+                   | Unchanged, None, Unchanged => Changed (PTree.Node101 l r)
+                   | Unchanged, None, Chempty => Changed (PTree.Node100 l)
+                   | Unchanged, None, Changed r' => Changed (PTree.Node101 l r')
+                   | Unchanged, Some o', Unchanged => if L.beq o' o then Changed (PTree.Node111 l o r) else Changed (PTree.Node111 l o' r)
+                   | Unchanged, Some o', Chempty => if L.beq o' o then Changed (PTree.Node110 l o) else Changed (PTree.Node110 l o')
+                   | Unchanged, Some o', Changed r' => if L.beq o' o then Changed (PTree.Node111 l o r') else Changed (PTree.Node111 l o' r')
+                   | Chempty, None, Unchanged => Changed (PTree.Node001 r)
+                   | Chempty, None, Chempty => Chempty
+                   | Chempty, None, Changed r' => Changed (PTree.Node001 r')
+                   | Chempty, Some o', Unchanged => if L.beq o' o then Changed (PTree.Node011 o r) else Changed (PTree.Node011 o' r)
+                   | Chempty, Some o', Chempty => if L.beq o' o then Changed (PTree.Node010 o) else Changed (PTree.Node010 o')
+                   | Chempty, Some o', Changed r' => if L.beq o' o then Changed (PTree.Node011 o r') else Changed (PTree.Node011 o' r')
+                   | Changed l', None, Unchanged => Changed (PTree.Node101 l' r)
+                   | Changed l', None, Chempty => Changed (PTree.Node100 l')
+                   | Changed l', None, Changed r' => Changed (PTree.Node101 l' r')
+                   | Changed l', Some o', Unchanged => if L.beq o' o then Changed (PTree.Node111 l' o r) else Changed (PTree.Node111 l' o' r)
+                   | Changed l', Some o', Chempty =>  if L.beq o' o then Changed (PTree.Node110 l' o) else Changed (PTree.Node110 l' o')
+                   | Changed l', Some o', Changed r' => if L.beq o' o then Changed (PTree.Node111 l' o r') else Changed (PTree.Node111 l' o' r')
+                   end
+ end.
+
+Lemma combine_l_eq':
+  forall m,
+  tree_eq (match combine_l m with Unchanged => PTree.Nodes m | Chempty => PTree.Empty | Changed m' => PTree.Nodes m' end)
+          (PTree.xcombine_l f (PTree.Nodes m)).
+Proof.
+  simpl.
+  induction m; simpl;
+  repeat match goal with 
+  | H: tree_eq (PTree.Nodes _) PTree.Empty |- _ => 
+           contradiction (tree_eq_Nodes_not_Empty H)
+  | H: tree_eq PTree.Empty (PTree.Nodes _) |- _ => 
+           apply tree_eq_sym in H; contradiction (tree_eq_Nodes_not_Empty H)
+ | |- context [match match?A with _ => _ end with _ => _ end ] => destruct A eqn:?H
+ | |- context [match ?A with _ => _ end] => destruct A eqn:?H
+ | |- _ => simple apply tree_eq_refl
+ end;
+ intro i; destruct i; try apply opt_eq_refl;
+ repeat match goal with H: tree_eq _ _ |- _ => apply (H i) || clear H end;
+ apply L.eq_sym; apply L.beq_correct; auto.
+Qed.
+
+Lemma combine_l_eq:
+  forall m x,
+  combine_l m = x ->
+  match x with
+  | Unchanged => tree_eq (PTree.Nodes m) (PTree.xcombine_l f (PTree.Nodes m))
+  | Chempty => tree_eq PTree.Empty (PTree.xcombine_l f (PTree.Nodes m))
+  | Changed m' => tree_eq (PTree.Nodes m') (PTree.xcombine_l f (PTree.Nodes m))
   end.
+Proof.
+intros.
+pose proof (combine_l_eq' m); rewrite H in H0; destruct x; auto.
+Qed.
+
+Fixpoint combine_r (m : PTree.tree' L.t) {struct m} : changed :=
+  match m with
+  | PTree.Node001 r => match combine_r r with
+                                      | Unchanged => Unchanged
+                                      | Chempty => Chempty
+                                      | Changed r' => Changed (PTree.Node001 r')
+                                      end
+  | PTree.Node010 o => match f None (Some o) with
+                                       | None => Chempty
+                                       | Some o' => if L.beq o' o then Unchanged else Changed (PTree.Node010 o')
+                                       end
+  | PTree.Node011 o r => match f None (Some o), combine_r r with
+                                         | None, Unchanged => Changed (PTree.Node001 r)
+                                         | None, Chempty => Chempty
+                                         | None, Changed r' => Changed (PTree.Node001 r')
+                                         | Some o', Unchanged => if L.beq o' o then Unchanged else Changed (PTree.Node011 o' r)
+                                         | Some o', Chempty => if L.beq o' o then Changed (PTree.Node010 o) else Changed (PTree.Node010 o')
+                                         | Some o', Changed r' => if L.beq o' o then Changed (PTree.Node011 o r') else Changed (PTree.Node011 o' r')
+                                         end
+  | PTree.Node100 l => match combine_r l with
+                                      | Unchanged => Unchanged
+                                      | Chempty => Chempty
+                                      | Changed l' => Changed (PTree.Node100 l')
+                                      end
+  | PTree.Node101 l r => match combine_r l, combine_r r with
+                                      | Unchanged, Unchanged => Unchanged
+                                      | Unchanged, Chempty => Changed (PTree.Node100 l)
+                                      | Unchanged, Changed r' => Changed (PTree.Node101 l r')
+                                      | Chempty, Unchanged => Changed (PTree.Node001 r)
+                                      | Chempty, Chempty => Chempty
+                                      | Chempty, Changed r' => Changed (PTree.Node001 r')
+                                      | Changed l', Unchanged => Changed (PTree.Node101 l' r)
+                                      | Changed l', Chempty => Changed (PTree.Node100 l')
+                                      | Changed l', Changed r' => Changed (PTree.Node101 l' r')
+                                      end
+  | PTree.Node110 l o => match combine_r l, f None (Some o) with
+                                         | Unchanged, None => Changed (PTree.Node100 l)
+                                         | Unchanged, Some o' => if L.beq o' o then Unchanged else Changed (PTree.Node110 l o')
+                                         | Chempty, None => Chempty
+                                         | Chempty, Some o' => if L.beq o' o then Changed (PTree.Node010 o) else Changed (PTree.Node010 o')
+                                         | Changed l', None => Changed (PTree.Node100 l')
+                                         | Changed l', Some o' => if L.beq o' o then Changed (PTree.Node110 l' o) else Changed (PTree.Node110 l' o')
+                                         end
+  | PTree.Node111 l o r => match combine_r l, f None (Some o), combine_r r with
+                   | Unchanged, None, Unchanged => Changed (PTree.Node101 l r)
+                   | Unchanged, None, Chempty => Changed (PTree.Node100 l)
+                   | Unchanged, None, Changed r' => Changed (PTree.Node101 l r')
+                   | Unchanged, Some o', Unchanged => if L.beq o' o then Changed (PTree.Node111 l o r) else Changed (PTree.Node111 l o' r)
+                   | Unchanged, Some o', Chempty => if L.beq o' o then Changed (PTree.Node110 l o) else Changed (PTree.Node110 l o')
+                   | Unchanged, Some o', Changed r' => if L.beq o' o then Changed (PTree.Node111 l o r') else Changed (PTree.Node111 l o' r')
+                   | Chempty, None, Unchanged => Changed (PTree.Node001 r)
+                   | Chempty, None, Chempty => Chempty
+                   | Chempty, None, Changed r' => Changed (PTree.Node001 r')
+                   | Chempty, Some o', Unchanged => if L.beq o' o then Changed (PTree.Node011 o r) else Changed (PTree.Node011 o' r)
+                   | Chempty, Some o', Chempty => if L.beq o' o then Changed (PTree.Node010 o) else Changed (PTree.Node010 o')
+                   | Chempty, Some o', Changed r' => if L.beq o' o then Changed (PTree.Node011 o r') else Changed (PTree.Node011 o' r')
+                   | Changed l', None, Unchanged => Changed (PTree.Node101 l' r)
+                   | Changed l', None, Chempty => Changed (PTree.Node100 l')
+                   | Changed l', None, Changed r' => Changed (PTree.Node101 l' r')
+                   | Changed l', Some o', Unchanged => if L.beq o' o then Changed (PTree.Node111 l' o r) else Changed (PTree.Node111 l' o' r)
+                   | Changed l', Some o', Chempty =>  if L.beq o' o then Changed (PTree.Node110 l' o) else Changed (PTree.Node110 l' o')
+                   | Changed l', Some o', Changed r' => if L.beq o' o then Changed (PTree.Node111 l' o r') else Changed (PTree.Node111 l' o' r')
+                   end
+ end.
+
+Lemma combine_r_eq':
+  forall m,
+  tree_eq (match combine_r m with Unchanged => PTree.Nodes m | Chempty => PTree.Empty | Changed m' => PTree.Nodes m' end)
+          (PTree.xcombine_r f (PTree.Nodes m)).
+Proof.
+  simpl.
+  induction m; simpl;
+  repeat match goal with 
+  | H: tree_eq (PTree.Nodes _) PTree.Empty |- _ => 
+           contradiction (tree_eq_Nodes_not_Empty H)
+  | H: tree_eq PTree.Empty (PTree.Nodes _) |- _ => 
+           apply tree_eq_sym in H; contradiction (tree_eq_Nodes_not_Empty H)
+ | |- context [match match?A with _ => _ end with _ => _ end ] => destruct A eqn:?H
+ | |- context [match ?A with _ => _ end] => destruct A eqn:?H
+ | |- _ => simple apply tree_eq_refl
+ end;
+ intro i; destruct i; try apply opt_eq_refl;
+ repeat match goal with H: tree_eq _ _ |- _ => apply (H i) || clear H end;
+ apply L.eq_sym; apply L.beq_correct; auto.
+Qed.
 
 Lemma combine_r_eq:
-  forall m,
-  tree_eq (match combine_r m with Unchanged => m | Changed m' => m' end)
-          (PTree.xcombine_r f m).
+  forall m x,
+  combine_r m = x ->
+  match x with
+  | Unchanged => tree_eq (PTree.Nodes m) (PTree.xcombine_r f (PTree.Nodes m))
+  | Chempty => tree_eq PTree.Empty (PTree.xcombine_r f (PTree.Nodes m))
+  | Changed m' => tree_eq (PTree.Nodes m') (PTree.xcombine_r f (PTree.Nodes m))
+  end.
 Proof.
-  induction m; simpl.
-  auto with combine.
-  destruct (combine_r m1) as [ | l']; destruct (combine_r m2) as [ | r'];
-  auto with combine.
-  case_eq (opt_beq (f None o) o); auto with combine.
+intros.
+pose proof (combine_r_eq' m); rewrite H in H0; destruct x; auto.
 Qed.
 
 Inductive changed2 : Type :=
   | Same
   | Same1
   | Same2
-  | CC(m: PTree.t L.t).
+  | CC0
+  | CC(m: PTree.tree' L.t).
 
-Fixpoint xcombine (m1 m2 : PTree.t L.t) {struct m1} : changed2 :=
-    match m1, m2 with
-    | PTree.Leaf, PTree.Leaf =>
-        Same
-    | PTree.Leaf, _ =>
-        match combine_r m2 with
-        | Unchanged => Same2
-        | Changed m => CC m
-        end
-    | _, PTree.Leaf =>
-        match combine_l m1 with
-        | Unchanged => Same1
-        | Changed m => CC m
-        end
-    | PTree.Node l1 o1 r1, PTree.Node l2 o2 r2 =>
-        let o := f o1 o2 in
-        match xcombine l1 l2, xcombine r1 r2 with
-        | Same, Same =>
-            match opt_beq o o1, opt_beq o o2 with
-            | true, true => Same
-            | true, false => Same1
-            | false, true => Same2
-            | false, false => CC(PTree.Node' l1 o r1)
-            end
-        | Same1, Same | Same, Same1 | Same1, Same1 =>
-            if opt_beq o o1 then Same1 else CC(PTree.Node' l1 o r1)
-        | Same2, Same | Same, Same2 | Same2, Same2 =>
-            if opt_beq o o2 then Same2 else CC(PTree.Node' l2 o r2)
-        | Same1, Same2 => CC(PTree.Node' l1 o r2)
-        | (Same|Same1), CC r => CC(PTree.Node' l1 o r)
-        | Same2, Same1 => CC(PTree.Node' l2 o r1)
-        | Same2, CC r => CC(PTree.Node' l2 o r)
-        | CC l, (Same|Same1) => CC(PTree.Node' l o r1)
-        | CC l, Same2 => CC(PTree.Node' l o r2)
-        | CC l, CC r => CC(PTree.Node' l o r)
-        end
-    end.
+Fixpoint xcombine (m1 m2 : PTree.tree' L.t) {struct m1} : changed2 :=
+ match m1, m2 with
+ | PTree.Node001 r1, PTree.Node001 r2 => 
+     match xcombine r1 r2 with
+     | Same => Same | Same1 => Same1 | Same2 => Same2 
+     | CC0 => CC0
+     | CC r => CC (PTree.Node001 r)
+     end
+ | PTree.Node001 r1, PTree.Node010 x2 => 
+     match f None (Some x2), combine_l r1 with
+     | None, Unchanged => Same1
+     | None, Chempty => CC0
+     | None, Changed r => CC (PTree.Node001 r)
+     | Some x, Unchanged => if L.beq x x2 then CC (PTree.Node011 x2 r1) else CC (PTree.Node011 x r1)
+     | Some x, Chempty => if L.beq x x2 then Same2 else CC (PTree.Node010 x)
+     | Some x, Changed r => if L.beq x x2 then CC (PTree.Node011 x2 r) else CC (PTree.Node011 x r)
+     end
+ | PTree.Node001 r1, PTree.Node011 x2 r2 => 
+     match f None (Some x2), xcombine r1 r2 with
+     | None, Same => Same1
+     | None, Same1 => Same1
+     | None, Same2 => CC (PTree.Node001 r2)
+     | None, CC0 => CC0
+     | None, CC r => CC (PTree.Node001 r)
+     | Some x, Same => if L.beq x x2 then Same2 else CC (PTree.Node011 x r2)
+     | Some x, Same1 => if L.beq x x2 then CC (PTree.Node011 x2 r1) else CC (PTree.Node011 x r1)
+     | Some x, Same2 => if L.beq x x2 then Same2 else CC (PTree.Node011 x r2)
+     | Some x, CC0 => if L.beq x x2 then CC (PTree.Node010 x2) else CC (PTree.Node010 x)
+     | Some x, CC r => if L.beq x x2 then CC (PTree.Node011 x2 r)  else CC (PTree.Node011 x r)
+    end
+ | PTree.Node001 r1, PTree.Node100 l2 => 
+     match combine_r l2, combine_l r1 with
+     | Unchanged, Unchanged => CC (PTree.Node101 l2 r1)
+     | Unchanged, Chempty => Same2
+     | Unchanged, Changed r => CC (PTree.Node101 l2 r)
+     | Chempty, Unchanged => Same1
+     | Chempty, Chempty => CC0
+     | Chempty, Changed r => CC (PTree.Node001 r)
+     | Changed l, Unchanged => CC (PTree.Node101 l r1)
+     | Changed l, Chempty => CC (PTree.Node100 l)
+     | Changed l, Changed r => CC (PTree.Node101 l r)
+     end
+ | PTree.Node001 r1, PTree.Node101 l2 r2 =>
+     match combine_r l2, xcombine r1 r2 with
+     | Unchanged, Same => Same2
+     | Unchanged, Same1 => CC (PTree.Node101 l2 r1)
+     | Unchanged, Same2 => Same2
+     | Unchanged, CC0 => CC (PTree.Node100 l2)
+     | Unchanged, CC r => CC (PTree.Node101 l2 r)
+     | Chempty, Same => Same1
+     | Chempty, Same1 => Same1
+     | Chempty, Same2 => CC (PTree.Node001 r2)
+     | Chempty, CC0 => CC0
+     | Chempty, CC r => CC (PTree.Node001 r)
+     | Changed l, Same => CC (PTree.Node101 l r1)
+     | Changed l, Same1 => CC (PTree.Node101 l r1)
+     | Changed l, Same2 => CC (PTree.Node101 l r2)
+     | Changed l, CC0 => CC (PTree.Node100 l)
+     | Changed l, CC r => CC (PTree.Node101 l r)
+     end
+ | PTree.Node001 r1, PTree.Node110 l2 x2 => 
+    match combine_r l2, f None (Some x2), combine_l r1 with
+    | Unchanged, None, Unchanged => CC (PTree.Node101 l2 r1)
+    | Unchanged, None, Chempty => CC (PTree.Node100 l2)
+    | Unchanged, None, Changed r => CC (PTree.Node101 l2 r)
+    | Unchanged, Some x, Unchanged => if L.beq x x2 then CC (PTree.Node111 l2 x2 r1) else CC (PTree.Node111 l2 x r1)
+    | Unchanged, Some x, Chempty =>  if L.beq x x2 then Same2 else CC (PTree.Node110 l2 x)
+    | Unchanged, Some x, Changed r => if L.beq x x2 then CC (PTree.Node111 l2 x2 r) else CC (PTree.Node111 l2 x r)
+    | Chempty, None, Unchanged => Same1
+    | Chempty, None, Chempty => CC0
+    | Chempty, None, Changed r => CC (PTree.Node001 r)
+    | Chempty, Some x, Unchanged => if L.beq x x2 then CC (PTree.Node011 x2 r1) else CC (PTree.Node011 x r1)
+    | Chempty, Some x, Chempty => if L.beq x x2 then CC (PTree.Node010 x2) else CC (PTree.Node010 x)
+    | Chempty, Some x, Changed r => if L.beq x x2 then CC (PTree.Node011 x2 r) else CC (PTree.Node011 x r)
+    | Changed l, None, Unchanged => CC (PTree.Node101 l r1)
+    | Changed l, None, Chempty => CC (PTree.Node100 l)
+    | Changed l, None, Changed r => CC (PTree.Node101 l r)
+    | Changed l, Some x, Unchanged => if L.beq x x2 then CC (PTree.Node111 l x2 r1) else CC (PTree.Node111 l x r1)
+    | Changed l, Some x, Chempty =>  if L.beq x x2 then CC (PTree.Node110 l x2) else CC (PTree.Node110 l x)
+    | Changed l, Some x, Changed r => if L.beq x x2 then CC (PTree.Node111 l x2 r) else CC (PTree.Node111 l x r)
+   end
+ | PTree.Node001 r1, PTree.Node111 l2 x2 r2 =>
+     match combine_r l2, f None (Some x2), xcombine r1 r2 with
+     | Unchanged, None, Same => CC (PTree.Node101 l2 r2)
+     | Unchanged, None, Same1 => CC (PTree.Node101 l2 r1)
+     | Unchanged, None, Same2 => CC (PTree.Node101 l2 r2)
+     | Unchanged, None, CC0 => CC (PTree.Node100 l2)
+     | Unchanged, None, CC r => CC (PTree.Node101 l2 r)
+     | Unchanged, Some x, Same => if L.beq x x2 then Same2 else CC (PTree.Node111 l2 x r2)
+     | Unchanged, Some x, Same1 => if L.beq x x2 then CC (PTree.Node111 l2 x2 r1) else CC (PTree.Node111 l2 x r1)
+     | Unchanged, Some x, Same2 => if L.beq x x2 then Same2 else CC (PTree.Node111 l2 x r2)
+     | Unchanged, Some x, CC0 => if L.beq x x2 then CC (PTree.Node110 l2 x2) else CC (PTree.Node110 l2 x)
+     | Unchanged, Some x, CC r => if L.beq x x2 then CC (PTree.Node111 l2 x2 r)  else CC (PTree.Node111 l2 x r)
+     | Chempty, None, Same => Same1
+     | Chempty, None, Same1 => Same1
+     | Chempty, None, Same2 => CC (PTree.Node001 r2)
+     | Chempty, None, CC0 => CC0
+     | Chempty, None, CC r => CC (PTree.Node001 r)
+     | Chempty, Some x, Same => if L.beq x x2 then CC (PTree.Node011 x2 r2) else CC (PTree.Node011 x r2)
+     | Chempty, Some x, Same1 => if L.beq x x2 then CC (PTree.Node011 x2 r1) else CC (PTree.Node011 x r1)
+     | Chempty, Some x, Same2 => if L.beq x x2 then CC (PTree.Node011 x2 r2) else CC (PTree.Node011 x r2)
+     | Chempty, Some x, CC0 => if L.beq x x2 then CC (PTree.Node010 x2) else CC (PTree.Node010 x)
+     | Chempty, Some x, CC r => if L.beq x x2 then CC (PTree.Node011 x2 r)  else CC (PTree.Node011 x r)
+     | Changed l, None, Same => CC (PTree.Node101 l r2)
+     | Changed l, None, Same1 => CC (PTree.Node101 l r1)
+     | Changed l, None, Same2 => CC (PTree.Node101 l r2)
+     | Changed l, None, CC0 => CC (PTree.Node100 l)
+     | Changed l, None, CC r => CC (PTree.Node101 l r)
+     | Changed l, Some x, Same => if L.beq x x2 then CC(PTree.Node111 l x2 r2) else CC (PTree.Node111 l x r2)
+     | Changed l, Some x, Same1 => if L.beq x x2 then CC (PTree.Node111 l x2 r1) else CC (PTree.Node111 l x r1)
+     | Changed l, Some x, Same2 => if L.beq x x2 then CC (PTree.Node111 l x2 r2) else CC (PTree.Node111 l x r2)
+     | Changed l, Some x, CC0 => if L.beq x x2 then CC (PTree.Node110 l x2) else CC (PTree.Node110 l x)
+     | Changed l, Some x, CC r => if L.beq x x2 then CC (PTree.Node111 l x2 r)  else CC (PTree.Node111 l x r)
+    end
+ | PTree.Node010 x1, PTree.Node001 r2 => 
+    match f (Some x1) None, combine_r r2 with
+    | None, Unchanged => Same2
+    | None, Chempty => CC0
+    | None, Changed r => CC (PTree.Node001 r)
+    | Some x, Unchanged => if L.beq x x1 then CC (PTree.Node011 x1 r2) else  CC (PTree.Node011 x r2)
+    | Some x, Chempty => if L.beq x x1 then Same1 else CC (PTree.Node010 x)
+    | Some x, Changed r => if L.beq x x1 then CC (PTree.Node011 x1 r) else CC (PTree.Node011 x r)
+   end
+ | PTree.Node010 x1, PTree.Node010 x2 => 
+    match f (Some x1)  (Some x2) with
+    | None => CC0
+    | Some x => match L.beq x x1, L.beq x x2 with
+                         | true, true => Same2
+                         | true, false => Same1
+                         | false, true => Same2
+                         | false, false => CC (PTree.Node010 x)
+                         end
+    end
+ | PTree.Node010 x1, PTree.Node011 x2 r2 =>
+    match f (Some x1) (Some x2), combine_r r2 with
+    | None, Unchanged => CC (PTree.Node001 r2)
+    | None, Chempty => CC0
+    | None, Changed r => CC (PTree.Node001 r)
+    | Some x, Unchanged => if L.beq x x2 then Same2 else if L.beq x x1 then CC (PTree.Node011 x1 r2) else CC (PTree.Node011 x r2)
+    | Some x, Chempty => if L.beq x x1 then Same1 else if L.beq x x2 then CC (PTree.Node010 x2) else CC (PTree.Node010 x)
+    | Some x, Changed r => if L.beq x x1 then CC (PTree.Node011 x1 r) else if L.beq x x2 then CC (PTree.Node011 x2 r) else CC (PTree.Node011 x r)
+    end
+ | PTree.Node010 x1, PTree.Node100 l2 => 
+    match combine_r l2, f (Some x1) None with
+    | Unchanged, None => Same2
+    | Unchanged, Some x => if L.beq x x1 then CC (PTree.Node110 l2 x1) else  CC (PTree.Node110 l2 x)
+    | Chempty, None => CC0
+    | Chempty, Some x => if L.beq x x1 then Same1 else CC (PTree.Node010 x)
+    | Changed l, None => CC (PTree.Node100 l)
+    | Changed l, Some x => if L.beq x x1 then CC (PTree.Node110 l x1) else CC (PTree.Node110 l x)
+   end
+ | PTree.Node010 x1, PTree.Node101 l2 r2 =>
+    match combine_r l2, f (Some x1) None, combine_r r2 with
+    | Unchanged, None, Unchanged => Same2
+    | Unchanged, None, Chempty => CC (PTree.Node100 l2)
+    | Unchanged, None, Changed r => CC (PTree.Node101 l2 r)
+    | Unchanged, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node111 l2 x1 r2) else CC (PTree.Node111 l2 x r2)
+    | Unchanged, Some x, Chempty => if L.beq x x1 then CC (PTree.Node110 l2 x1) else CC (PTree.Node110 l2 x)
+    | Unchanged, Some x, Changed r => if L.beq x x1 then CC (PTree.Node111 l2 x1 r) else CC (PTree.Node111 l2 x r)
+    | Chempty, None, Unchanged => CC (PTree.Node001 r2)
+    | Chempty, None, Chempty => CC0
+    | Chempty, None, Changed r => CC (PTree.Node001 r)
+    | Chempty, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node011 x1 r2) else CC (PTree.Node011 x r2)
+    | Chempty, Some x, Chempty => if L.beq x x1 then Same1 else CC (PTree.Node010 x)
+    | Chempty, Some x, Changed r => if L.beq x x1 then CC (PTree.Node011 x1 r) else CC (PTree.Node011 x r)
+    | Changed l, None, Unchanged => CC (PTree.Node101 l r2)
+    | Changed l, None, Chempty => CC (PTree.Node100 l)
+    | Changed l, None, Changed r => CC (PTree.Node101 l r)
+    | Changed l, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node111 l x1 r2) else CC (PTree.Node111 l x r2)
+    | Changed l, Some x, Chempty => if L.beq x x1 then CC (PTree.Node110 l x1) else CC (PTree.Node110 l x)
+    | Changed l, Some x, Changed r => if L.beq x x1 then CC (PTree.Node111 l x1 r) else CC (PTree.Node111 l x r)
+   end
+ | PTree.Node010 x1, PTree.Node110 l2 x2 =>
+    match combine_r l2, f (Some x1) (Some x2) with
+    | Unchanged, None => CC (PTree.Node100 l2)
+    | Unchanged, Some x => if L.beq x x2 then Same2 else if L.beq x x1 then CC (PTree.Node110 l2 x1) else CC (PTree.Node110 l2 x)
+    | Chempty, None => CC0
+    | Chempty, Some x => if L.beq x x1 then Same1 else if L.beq x x2 then CC (PTree.Node010 x2) else CC (PTree.Node010 x)
+    | Changed l, None => CC (PTree.Node100 l)
+    | Changed l, Some x => if L.beq x x1 then CC (PTree.Node110 l x1) else if L.beq x x2 then CC (PTree.Node110 l x2) else CC (PTree.Node110 l x)
+    end
+ | PTree.Node010 x1, PTree.Node111 l2 x2 r2 =>
+    match combine_r l2, f (Some x1) (Some x2), combine_r r2 with
+    | Unchanged, None, Unchanged => CC (PTree.Node101 l2 r2)
+    | Unchanged, None, Chempty => CC (PTree.Node100 l2)
+    | Unchanged, None, Changed r => CC (PTree.Node101 l2 r)
+    | Unchanged, Some x, Unchanged => if L.beq x x2 then Same2 else if L.beq x x1 then CC (PTree.Node111 l2 x1 r2) else CC (PTree.Node111 l2 x r2)
+    | Unchanged, Some x, Chempty => if L.beq x x1 then CC (PTree.Node110 l2 x1) else if L.beq x x2 then CC (PTree.Node110 l2 x2) else CC (PTree.Node110 l2 x)
+    | Unchanged, Some x, Changed r =>  if L.beq x x1 then CC (PTree.Node111 l2 x1 r) else if L.beq x x2 then CC (PTree.Node111 l2 x2 r) else CC (PTree.Node111 l2 x r)
+    | Chempty, None, Unchanged => CC (PTree.Node001 r2)
+    | Chempty, None, Chempty => CC0
+    | Chempty, None, Changed r => CC (PTree.Node001 r)
+    | Chempty, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node011 x1 r2) else if L.beq x x2 then CC (PTree.Node011 x2 r2) else CC (PTree.Node011 x r2)
+    | Chempty, Some x, Chempty => if L.beq x x1 then Same1 else if L.beq x x2 then CC (PTree.Node010 x2) else CC (PTree.Node010 x)
+    | Chempty, Some x, Changed r => if L.beq x x1 then CC (PTree.Node011 x1 r) else if L.beq x x2 then CC (PTree.Node011 x2 r) else CC (PTree.Node011 x r)
+    | Changed l, None, Unchanged => CC (PTree.Node101 l r2)
+    | Changed l, None, Chempty => CC (PTree.Node100 l)
+    | Changed l, None, Changed r => CC (PTree.Node101 l r)
+    | Changed l, Some x, Unchanged => if L.beq x x2 then CC (PTree.Node111 l x2 r2) else if L.beq x x1 then CC (PTree.Node111 l x1 r2) else CC (PTree.Node111 l x r2)
+    | Changed l, Some x, Chempty => if L.beq x x1 then CC (PTree.Node110 l x1) else if L.beq x x2 then CC (PTree.Node110 l x2) else CC (PTree.Node110 l x)
+    | Changed l, Some x, Changed r =>  if L.beq x x1 then CC (PTree.Node111 l x1 r) else if L.beq x x2 then CC (PTree.Node111 l x2 r) else CC (PTree.Node111 l x r)
+   end
+ | PTree.Node011 x1 r1, PTree.Node001 r2 =>
+    match f (Some x1) None, xcombine r1 r2 with
+    | None, Same => Same2
+    | None, Same1 => CC (PTree.Node001 r1)
+    | None, Same2 => Same2
+    | None, CC0 => CC0
+    | None, CC r => CC (PTree.Node001 r)
+    | Some x, Same => if L.beq x x1 then Same1 else CC (PTree.Node011 x r1)
+    | Some x, Same1 => if L.beq x x1 then Same1 else CC (PTree.Node011 x r1)
+    | Some x, Same2 => if L.beq x x1 then CC (PTree.Node011 x1 r2) else CC (PTree.Node011 x r2)
+    | Some x, CC0 => if L.beq x x1 then CC (PTree.Node010 x1) else CC (PTree.Node010 x)
+    | Some x, CC r => if L.beq x x1 then CC (PTree.Node011 x1 r) else CC (PTree.Node011 x r)
+   end
+ | PTree.Node011 x1 r1, PTree.Node010 x2 =>
+   match f (Some x1) (Some x2), combine_l r1 with
+   | None, Unchanged => CC (PTree.Node001 r1)
+   | None, Chempty => CC0
+   | None, Changed r => CC (PTree.Node001 r)
+   | Some x, Unchanged => if L.beq x x1 then Same1 else if L.beq x x2 then CC (PTree.Node011 x2 r1) else CC (PTree.Node011 x r1)
+   | Some x, Chempty => if L.beq x x2 then Same2 else if L.beq x x1 then CC (PTree.Node010 x1) else CC (PTree.Node010 x)
+   | Some x, Changed r => if L.beq x x1 then CC (PTree.Node011 x1 r) else if L.beq x x2 then CC (PTree.Node011 x2 r) else CC (PTree.Node011 x r)
+  end
+ | PTree.Node011 x1 r1, PTree.Node011 x2 r2 =>
+   match f (Some x1) (Some x2), xcombine r1 r2 with
+   | None, Same => CC (PTree.Node001 r1)
+   | None, Same1 => CC (PTree.Node001 r1)
+   | None, Same2 => CC (PTree.Node001 r2)
+   | None, CC0 => CC0
+   | None, CC r => CC (PTree.Node001 r)
+   | Some x, Same => if L.beq x x1 then Same1 else if L.beq x x2 then Same2 else CC (PTree.Node011 x r1)
+   | Some x, Same1 => if L.beq x x1 then Same1 else if L.beq x x2 then CC (PTree.Node011 x2 r1) else CC (PTree.Node011 x r1)
+   | Some x, Same2 => if L.beq x x2 then Same2 else if L.beq x x1 then CC (PTree.Node011 x1 r2) else CC (PTree.Node011 x r2)
+   | Some x, CC0 => if L.beq x x1 then CC (PTree.Node010 x1) else if L.beq x x2 then CC (PTree.Node010 x2) else CC (PTree.Node010 x)
+   | Some x, CC r => if L.beq x x1 then CC (PTree.Node011 x1 r) else if L.beq x x2 then CC (PTree.Node011 x2 r) else CC (PTree.Node011 x r)
+  end
+ | PTree.Node011 x1 r1, PTree.Node100 l2 =>
+  match combine_r l2, f (Some x1) None, combine_l r1 with
+  | Unchanged, None, Unchanged => CC (PTree.Node101 l2 r1)
+  | Unchanged, None, Chempty => Same2
+  | Unchanged, None, Changed r => CC (PTree.Node101 l2 r)
+  | Unchanged, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node111 l2 x1 r1) else CC (PTree.Node111 l2 x r1)
+  | Unchanged, Some x, Chempty => if L.beq x x1 then CC (PTree.Node110 l2 x1) else CC (PTree.Node110 l2 x)
+  | Unchanged, Some x, Changed r => if L.beq x x1 then CC (PTree.Node111 l2 x1 r) else CC (PTree.Node111 l2 x r)
+  | Chempty, None, Unchanged => CC (PTree.Node001 r1)
+  | Chempty, None, Chempty => CC0
+  | Chempty, None, Changed r => CC (PTree.Node001 r)
+  | Chempty, Some x, Unchanged => if L.beq x x1 then Same1 else CC (PTree.Node011 x r1)
+  | Chempty, Some x, Chempty => if L.beq x x1 then CC (PTree.Node010 x1) else CC (PTree.Node010 x)
+  | Chempty, Some x, Changed r =>  if L.beq x x1 then CC (PTree.Node011 x1 r) else CC (PTree.Node011 x r)
+  | Changed l, None, Unchanged => CC (PTree.Node101 l r1)
+  | Changed l, None, Chempty => CC (PTree.Node100 l)
+  | Changed l, None, Changed r => CC (PTree.Node101 l r)
+  | Changed l, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node111 l x1 r1) else CC (PTree.Node111 l x r1)
+  | Changed l, Some x, Chempty => if L.beq x x1 then CC (PTree.Node110 l x1) else CC (PTree.Node110 l x)
+  | Changed l, Some x, Changed r => if L.beq x x1 then CC (PTree.Node111 l x1 r) else CC (PTree.Node111 l x r)
+ end
+ | PTree.Node011 x1 r1, PTree.Node101 l2 r2 =>
+ match combine_r l2, f (Some x1) None, xcombine r1 r2 with
+  | Unchanged, None, Same => Same2
+  | Unchanged, None, Same1 => CC (PTree.Node101 l2 r1)
+  | Unchanged, None, Same2 => Same2
+  | Unchanged, None, CC0 => CC (PTree.Node100 l2)
+  | Unchanged, None, CC r => CC (PTree.Node101 l2 r)
+  | Unchanged, Some x, Same => if L.beq x x1 then CC (PTree.Node111 l2 x1 r1) else CC (PTree.Node111 l2 x r1)
+  | Unchanged, Some x, Same1 => if L.beq x x1 then CC (PTree.Node111 l2 x1 r1) else CC (PTree.Node111 l2 x r1)
+  | Unchanged, Some x, Same2 => if L.beq x x1 then CC (PTree.Node111 l2 x1 r2) else CC (PTree.Node111 l2 x r2)
+  | Unchanged, Some x, CC0 => if L.beq x x1 then CC (PTree.Node110 l2 x1) else CC (PTree.Node110 l2 x)
+  | Unchanged, Some x, CC r => if L.beq x x1 then CC (PTree.Node111 l2 x1 r) else CC (PTree.Node111 l2 x r)
+  | Chempty, None, Same => CC (PTree.Node001 r2)
+  | Chempty, None, Same1 => CC (PTree.Node001 r1)
+  | Chempty, None, Same2 => CC (PTree.Node001 r2)
+  | Chempty, None, CC0 => CC0
+  | Chempty, None, CC r => CC (PTree.Node001 r)
+  | Chempty, Some x, Same => if L.beq x x1 then Same1 else CC (PTree.Node011 x r1)
+  | Chempty, Some x, Same1 => if L.beq x x1 then Same1 else CC (PTree.Node011 x r1)
+  | Chempty, Some x, Same2 => if L.beq x x1 then CC (PTree.Node011 x1 r2) else CC (PTree.Node011 x r2)
+  | Chempty, Some x, CC0 => if L.beq x x1 then CC (PTree.Node010 x1) else CC (PTree.Node010 x)
+  | Chempty, Some x, CC r =>  if L.beq x x1 then CC (PTree.Node011 x1 r) else CC (PTree.Node011 x r)
+  | Changed l, None, Same => CC (PTree.Node101 l r2)
+  | Changed l, None, Same1 => CC (PTree.Node101 l r1)
+  | Changed l, None, Same2 => CC (PTree.Node101 l r2)
+  | Changed l, None, CC0 => CC (PTree.Node100 l)
+  | Changed l, None, CC r => CC (PTree.Node101 l r)
+  | Changed l, Some x, Same => if L.beq x x1 then CC (PTree.Node111 l x1 r1) else CC (PTree.Node111 l x r1)
+  | Changed l, Some x, Same1 => if L.beq x x1 then CC (PTree.Node111 l x1 r1) else CC (PTree.Node111 l x r1)
+  | Changed l, Some x, Same2 => if L.beq x x1 then CC (PTree.Node111 l x1 r2) else CC (PTree.Node111 l x r2)
+  | Changed l, Some x, CC0 => if L.beq x x1 then CC (PTree.Node110 l x1) else CC (PTree.Node110 l x)
+  | Changed l, Some x, CC r => if L.beq x x1 then CC (PTree.Node111 l x1 r) else CC (PTree.Node111 l x r)
+ end
+ | PTree.Node011 x1 r1, PTree.Node110 l2 x2 =>
+ match combine_r l2, f (Some x1) (Some x2), combine_l r1 with
+  | Unchanged, None, Unchanged => CC (PTree.Node101 l2 r1)
+  | Unchanged, None, Chempty => CC (PTree.Node100 l2)
+  | Unchanged, None, Changed r => CC (PTree.Node101 l2 r)
+  | Unchanged, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node111 l2 x1 r1) else if L.beq x x2 then CC (PTree.Node111 l2 x2 r1) else CC (PTree.Node111 l2 x r1)
+  | Unchanged, Some x, Chempty => if L.beq x x1 then CC (PTree.Node110 l2 x1) else if L.beq x x2 then CC (PTree.Node110 l2 x2) else CC (PTree.Node110 l2 x)
+  | Unchanged, Some x, Changed r => if L.beq x x1 then CC (PTree.Node111 l2 x1 r) else if L.beq x x2 then CC (PTree.Node111 l2 x2 r) else CC (PTree.Node111 l2 x r)
+  | Chempty, None, Unchanged => CC (PTree.Node001 r1)
+  | Chempty, None, Chempty => CC0
+  | Chempty, None, Changed r => CC (PTree.Node001 r)
+  | Chempty, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node011 x1 r1) else if L.beq x x2 then CC (PTree.Node011 x2 r1) else CC (PTree.Node011 x r1)
+  | Chempty, Some x, Chempty => if L.beq x x1 then CC (PTree.Node010 x1) else if L.beq x x2 then CC (PTree.Node010 x2) else CC (PTree.Node010 x)
+  | Chempty, Some x, Changed r =>  if L.beq x x1 then CC (PTree.Node011 x1 r) else if L.beq x x2 then CC (PTree.Node011 x2 r) else  CC (PTree.Node011 x r)
+  | Changed l, None, Unchanged => CC (PTree.Node101 l r1)
+  | Changed l, None, Chempty => CC (PTree.Node100 l)
+  | Changed l, None, Changed r => CC (PTree.Node101 l r)
+  | Changed l, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node111 l x1 r1) else if L.beq x x2 then CC (PTree.Node111 l x2 r1) else CC (PTree.Node111 l x r1)
+  | Changed l, Some x, Chempty => if L.beq x x1 then CC (PTree.Node110 l x1) else CC (PTree.Node110 l x)
+  | Changed l, Some x, Changed r => if L.beq x x1 then CC (PTree.Node111 l x1 r) else CC (PTree.Node111 l x r)
+ end
+ | PTree.Node011 x1 r1, PTree.Node111 l2 x2 r2 =>
+ match combine_r l2, f (Some x1) (Some x2), xcombine r1 r2 with
+  | Unchanged, None, Same => CC (PTree.Node101 l2 r2)
+  | Unchanged, None, Same1 => CC (PTree.Node101 l2 r1)
+  | Unchanged, None, Same2 => CC (PTree.Node101 l2 r2)
+  | Unchanged, None, CC0 => CC (PTree.Node100 l2)
+  | Unchanged, None, CC r => CC (PTree.Node101 l2 r)
+  | Unchanged, Some x, Same => if L.beq x x1 then CC (PTree.Node111 l2 x1 r1) else if L.beq x x2 then Same2 else CC (PTree.Node111 l2 x r2)
+  | Unchanged, Some x, Same1 => if L.beq x x1 then CC (PTree.Node111 l2 x1 r1) else CC (PTree.Node111 l2 x r1)
+  | Unchanged, Some x, Same2 => if L.beq x x1 then CC (PTree.Node111 l2 x1 r2) else if L.beq x x2 then CC (PTree.Node111 l2 x2 r2) else CC (PTree.Node111 l2 x r2)
+  | Unchanged, Some x, CC0 => if L.beq x x1 then CC (PTree.Node110 l2 x1) else if L.beq x x2 then CC (PTree.Node110 l2 x2) else CC (PTree.Node110 l2 x)
+  | Unchanged, Some x, CC r => if L.beq x x1 then CC (PTree.Node111 l2 x1 r) else if L.beq x x2 then CC (PTree.Node111 l2 x2 r) else CC (PTree.Node111 l2 x r)
+  | Chempty, None, Same => CC (PTree.Node001 r2)
+  | Chempty, None, Same1 => CC (PTree.Node001 r1)
+  | Chempty, None, Same2 => CC (PTree.Node001 r2)
+  | Chempty, None, CC0 => CC0
+  | Chempty, None, CC r => CC (PTree.Node001 r)
+  | Chempty, Some x, Same => if L.beq x x1 then Same1 else if L.beq x x2 then CC (PTree.Node011 x2 r1) else CC (PTree.Node011 x r1)
+  | Chempty, Some x, Same1 => if L.beq x x1 then Same1 else if L.beq x x2 then CC (PTree.Node011 x2 r1) else CC (PTree.Node011 x r1)
+  | Chempty, Some x, Same2 => if L.beq x x1 then CC (PTree.Node011 x1 r2) else if L.beq x x2 then CC (PTree.Node011 x2 r2) else CC (PTree.Node011 x r2)
+  | Chempty, Some x, CC0 => if L.beq x x1 then CC (PTree.Node010 x1) else if L.beq x x2 then CC (PTree.Node010 x2) else CC (PTree.Node010 x)
+  | Chempty, Some x, CC r =>  if L.beq x x1 then CC (PTree.Node011 x1 r) else if L.beq x x2 then CC (PTree.Node011 x2 r) else CC (PTree.Node011 x r)
+  | Changed l, None, Same => CC (PTree.Node101 l r2)
+  | Changed l, None, Same1 => CC (PTree.Node101 l r1)
+  | Changed l, None, Same2 => CC (PTree.Node101 l r2)
+  | Changed l, None, CC0 => CC (PTree.Node100 l)
+  | Changed l, None, CC r => CC (PTree.Node101 l r)
+  | Changed l, Some x, Same => if L.beq x x1 then CC (PTree.Node111 l x1 r1) else if L.beq x x2 then CC (PTree.Node111 l x2 r1) else CC (PTree.Node111 l x r1)
+  | Changed l, Some x, Same1 => if L.beq x x1 then CC (PTree.Node111 l x1 r1) else if L.beq x x2 then CC (PTree.Node111 l x2 r1) else CC (PTree.Node111 l x r1)
+  | Changed l, Some x, Same2 => if L.beq x x1 then CC (PTree.Node111 l x1 r2) else if L.beq x x2 then CC (PTree.Node111 l x2 r2) else CC (PTree.Node111 l x r2)
+  | Changed l, Some x, CC0 => if L.beq x x1 then CC (PTree.Node110 l x1) else if L.beq x x2 then CC (PTree.Node110 l x2) else CC (PTree.Node110 l x)
+  | Changed l, Some x, CC r => if L.beq x x1 then CC (PTree.Node111 l x1 r) else if L.beq x x2 then CC (PTree.Node111 l x2 r) else CC (PTree.Node111 l x r)
+ end
+ | PTree.Node100 l1, PTree.Node001 r2 =>
+  match combine_l l1, combine_r r2 with
+  | Unchanged, Unchanged => CC (PTree.Node101 l1 r2)
+  | Unchanged, Chempty => Same1
+  | Unchanged, Changed r => CC (PTree.Node101 l1 r)
+  | Chempty, Unchanged => Same2
+  | Chempty, Chempty => CC0
+  | Chempty, Changed r => CC (PTree.Node001 r)
+  | Changed l, Unchanged => CC (PTree.Node101 l r2)
+  | Changed l, Chempty => CC (PTree.Node100 l)
+  | Changed l, Changed r => CC (PTree.Node101 l r)
+  end
+ | PTree.Node100 l1, PTree.Node010 x2 =>
+  match combine_l l1, f None (Some x2) with
+  | Unchanged, None => Same1
+  | Unchanged, Some x => if L.beq x x2 then CC (PTree.Node110 l1 x2) else CC (PTree.Node110 l1 x)
+  | Chempty, None => CC0
+  | Chempty, Some x => if L.beq x x2 then Same2 else CC (PTree.Node010 x)
+  | Changed l, None => CC (PTree.Node100 l)
+  | Changed l, Some x => if L.beq x x2 then CC (PTree.Node110 l x2) else CC (PTree.Node110 l x)
+  end
+ | PTree.Node100 l1, PTree.Node011 x2 r2 =>
+   match combine_l l1, f None (Some x2), combine_r r2 with
+  | Unchanged, None, Unchanged => CC (PTree.Node101 l1 r2)
+  | Unchanged, None, Chempty => Same1
+  | Unchanged, None, Changed r => CC (PTree.Node101 l1 r)
+  | Unchanged, Some x, Unchanged => if L.beq x x2 then CC (PTree.Node111 l1 x2 r2) else CC (PTree.Node111 l1 x r2)
+  | Unchanged, Some x, Chempty => if L.beq x x2 then CC (PTree.Node110 l1 x2) else CC (PTree.Node110 l1 x)
+  | Unchanged, Some x, Changed r => if L.beq x x2 then CC (PTree.Node111 l1 x2 r) else CC (PTree.Node111 l1 x r)
+  | Chempty, None, Unchanged => CC (PTree.Node001 r2)
+  | Chempty, None, Chempty => CC0
+  | Chempty, None, Changed r => CC (PTree.Node001 r)
+  | Chempty, Some x, Unchanged => if L.beq x x2 then CC (PTree.Node011 x2 r2) else CC (PTree.Node011 x r2)
+  | Chempty, Some x, Chempty => if L.beq x x2 then CC (PTree.Node010 x2) else CC (PTree.Node010 x)
+  | Chempty, Some x, Changed r =>  if L.beq x x2 then CC (PTree.Node011 x2 r) else CC (PTree.Node011 x r)
+  | Changed l, None, Unchanged => CC (PTree.Node101 l r2)
+  | Changed l, None, Chempty => CC (PTree.Node100 l)
+  | Changed l, None, Changed r => CC (PTree.Node101 l r)
+  | Changed l, Some x, Unchanged => if L.beq x x2 then CC (PTree.Node111 l x2 r2) else CC (PTree.Node111 l x r2)
+  | Changed l, Some x, Chempty => if L.beq x x2 then CC (PTree.Node110 l x2) else CC (PTree.Node110 l x)
+  | Changed l, Some x, Changed r => if L.beq x x2 then CC (PTree.Node111 l x2 r) else CC (PTree.Node111 l x r)
+ end
+ | PTree.Node100 l1, PTree.Node100 l2 =>
+  match xcombine l1 l2 with
+  | Same => Same
+  | Same1 => Same1
+  | Same2 => Same2
+  | CC0 => CC0
+  | CC l => CC (PTree.Node100 l)
+  end
+ | PTree.Node100 l1, PTree.Node101 l2 r2 =>
+  match xcombine l1 l2, combine_r r2 with
+  | Same, Unchanged => Same2
+  | Same, Chempty => Same1
+  | Same, Changed r => CC (PTree.Node101 l2 r)
+  | Same1, Unchanged => CC (PTree.Node101 l1 r2)
+  | Same1, Chempty => Same1
+  | Same1, Changed r => CC (PTree.Node101 l1 r)
+  | Same2, Unchanged => Same2
+  | Same2, Chempty => CC (PTree.Node100 l2)
+  | Same2, Changed r => CC (PTree.Node101 l2 r)
+  | CC0, Unchanged => CC (PTree.Node001 r2)
+  | CC0, Chempty => CC0
+  | CC0, Changed r => CC (PTree.Node001 r)
+  | CC l, Unchanged => CC (PTree.Node101 l r2)
+  | CC l, Chempty => CC (PTree.Node100 l)
+  | CC l, Changed r => CC (PTree.Node101 l r)
+  end
+ | PTree.Node100 l1, PTree.Node110 l2 x2 =>
+  match xcombine l1 l2, f None (Some x2) with
+  | Same, None => Same1
+  | Same, Some x => if L.beq x x2 then Same2 else CC (PTree.Node110 l2 x)
+  | Same1, None => Same1
+  | Same1, Some x => if L.beq x x2 then CC (PTree.Node110 l1 x2) else CC (PTree.Node110 l1 x)
+  | Same2, None => CC (PTree.Node100 l2)
+  | Same2, Some x => if L.beq x x2 then Same2 else CC (PTree.Node110 l2 x)
+  | CC0, None => CC0
+  | CC0, Some x => if L.beq x x2 then CC (PTree.Node010 x2) else CC (PTree.Node010 x)
+  | CC l, None => CC (PTree.Node100 l)
+  | CC l, Some x => if L.beq x x2 then CC (PTree.Node110 l x2) else CC (PTree.Node110 l x)
+  end
+ | PTree.Node100 l1, PTree.Node111 l2 x2 r2 =>
+  match xcombine l1 l2, f None (Some x2), combine_r r2 with
+  | Same, None, Unchanged => CC (PTree.Node101 l2 r2)
+  | Same, None, Chempty => Same1
+  | Same, None, Changed r => CC (PTree.Node101 l2 r)
+  | Same, Some x, Unchanged => if L.beq x x2 then Same2 else CC (PTree.Node111 l2 x r2)
+  | Same, Some x, Chempty => if L.beq x x2 then CC (PTree.Node110 l2 x2) else CC (PTree.Node110 l2 x)
+  | Same, Some x, Changed r => if L.beq x x2 then CC (PTree.Node111 l2 x2 r) else CC (PTree.Node111 l2 x r)
+  | Same1, None, Unchanged => CC (PTree.Node101 l1 r2)
+  | Same1, None, Chempty => Same1
+  | Same1, None, Changed r => CC (PTree.Node101 l1 r)
+  | Same1, Some x, Unchanged => if L.beq x x2 then CC (PTree.Node111 l1 x2 r2) else CC (PTree.Node111 l1 x r2)
+  | Same1, Some x, Chempty => if L.beq x x2 then CC (PTree.Node110 l1 x2) else CC (PTree.Node110 l1 x)
+  | Same1, Some x, Changed r => if L.beq x x2 then CC (PTree.Node111 l1 x2 r) else CC (PTree.Node111 l1 x r)
+  | Same2, None, Unchanged => CC (PTree.Node101 l2 r2)
+  | Same2, None, Chempty =>CC (PTree.Node100 l2)
+  | Same2, None, Changed r => CC (PTree.Node101 l2 r)
+  | Same2, Some x, Unchanged => if L.beq x x2 then Same2 else CC (PTree.Node111 l2 x r2)
+  | Same2, Some x, Chempty => if L.beq x x2 then CC (PTree.Node110 l2 x2) else CC (PTree.Node110 l2 x)
+  | Same2, Some x, Changed r => if L.beq x x2 then CC (PTree.Node111 l2 x2 r) else CC (PTree.Node111 l2 x r)
+  | CC0, None, Unchanged => CC (PTree.Node001 r2)
+  | CC0, None, Chempty => CC0
+  | CC0, None, Changed r => CC (PTree.Node001 r)
+  | CC0, Some x, Unchanged => if L.beq x x2 then CC (PTree.Node011 x2 r2) else CC (PTree.Node011 x r2)
+  | CC0, Some x, Chempty => if L.beq x x2 then CC (PTree.Node010 x2) else CC (PTree.Node010 x)
+  | CC0, Some x, Changed r => if L.beq x x2 then CC (PTree.Node011 x2 r) else CC (PTree.Node011 x r)
+  | CC l, None, Unchanged => CC (PTree.Node101 l r2)
+  | CC l, None, Chempty => CC (PTree.Node100 l)
+  | CC l, None, Changed r => CC (PTree.Node101 l r)
+  | CC l, Some x, Unchanged => if L.beq x x2 then CC (PTree.Node111 l x2 r2) else CC (PTree.Node111 l x r2)
+  | CC l, Some x, Chempty => if L.beq x x2 then CC (PTree.Node110 l x2) else CC (PTree.Node110 l x)
+  | CC l, Some x, Changed r => if L.beq x x2 then CC (PTree.Node111 l x2 r) else CC (PTree.Node111 l x r)
+  end
+ | PTree.Node101 l1 r1, PTree.Node001 r2 =>
+  match combine_l l1, xcombine r1 r2 with
+  | Unchanged, Same => Same1
+  | Unchanged, Same1 => Same1
+  | Unchanged, Same2 => CC (PTree.Node101 l1 r2)
+  | Unchanged, CC0 => CC (PTree.Node100 l1)
+  | Unchanged, CC r => CC (PTree.Node101 l1 r)
+  | Chempty, Same => Same2
+  | Chempty, Same1 => CC (PTree.Node001 r1)
+  | Chempty, Same2 => Same2
+  | Chempty, CC0 => CC0
+  | Chempty, CC r => CC (PTree.Node001 r)
+  | Changed l, Same => CC (PTree.Node101 l r2)
+  | Changed l, Same1 => CC (PTree.Node101 l r1)
+  | Changed l, Same2 => CC (PTree.Node101 l r2)
+  | Changed l, CC0 => CC (PTree.Node100 l)
+  | Changed l, CC r => CC (PTree.Node101 l r)
+  end
+
+ | PTree.Node101 l1 r1, PTree.Node010 x2 =>
+  match combine_l l1, f None (Some x2), combine_l r1 with
+  | Unchanged, None, Unchanged => Same1
+  | Unchanged, None, Chempty => CC (PTree.Node100 l1)
+  | Unchanged, None, Changed r => CC (PTree.Node101 l1 r)
+  | Unchanged, Some x, Unchanged => if L.beq x x2 then CC (PTree.Node111 l1 x2 r1) else CC (PTree.Node111 l1 x r1)
+  | Unchanged, Some x, Chempty => if L.beq x x2 then CC (PTree.Node110 l1 x2) else CC (PTree.Node110 l1 x)
+  | Unchanged, Some x, Changed r => if L.beq x x2 then CC (PTree.Node111 l1 x2 r) else CC (PTree.Node111 l1 x r)
+  | Chempty, None, Unchanged => CC (PTree.Node001 r1)
+  | Chempty, None, Chempty => CC0
+  | Chempty, None, Changed r => CC (PTree.Node001 r)
+  | Chempty, Some x, Unchanged => if L.beq x x2 then CC (PTree.Node011 x2 r1) else CC (PTree.Node011 x r1)
+  | Chempty, Some x, Chempty => if L.beq x x2 then Same2 else CC (PTree.Node010 x)
+  | Chempty, Some x, Changed r => if L.beq x x2 then CC (PTree.Node011 x2 r) else CC (PTree.Node011 x r)
+  | Changed l, None, Unchanged => CC (PTree.Node101 l r1)
+  | Changed l, None, Chempty => CC (PTree.Node100 l)
+  | Changed l, None, Changed r => CC (PTree.Node101 l r)
+  | Changed l, Some x, Unchanged => if L.beq x x2 then CC (PTree.Node111 l x2 r1) else CC (PTree.Node111 l x r1)
+  | Changed l, Some x, Chempty => if L.beq x x2 then CC (PTree.Node110 l x2) else CC (PTree.Node110 l x)
+  | Changed l, Some x, Changed r => if L.beq x x2 then CC (PTree.Node111 l x2 r) else CC (PTree.Node111 l x r)
+  end
+ | PTree.Node101 l1 r1, PTree.Node011 x2 r2 =>
+   match combine_l l1, f None (Some x2), xcombine r1 r2 with
+  | Unchanged, None, Same => Same1
+  | Unchanged, None, Same1 => Same1
+  | Unchanged, None, Same2 => CC (PTree.Node101 l1 r2)
+  | Unchanged, None, CC0 => CC (PTree.Node100 l1)
+  | Unchanged, None, CC r => CC (PTree.Node101 l1 r)
+  | Unchanged, Some x, Same => if L.beq x x2 then CC (PTree.Node111 l1 x2 r2) else CC (PTree.Node111 l1 x r2)
+  | Unchanged, Some x, Same1 => if L.beq x x2 then CC (PTree.Node111 l1 x2 r1) else CC (PTree.Node111 l1 x r1)
+  | Unchanged, Some x, Same2 => if L.beq x x2 then CC (PTree.Node111 l1 x2 r2) else CC (PTree.Node111 l1 x r2)
+  | Unchanged, Some x, CC0 => if L.beq x x2 then CC (PTree.Node110 l1 x2) else CC (PTree.Node110 l1 x)
+  | Unchanged, Some x, CC r => if L.beq x x2 then CC (PTree.Node111 l1 x2 r) else CC (PTree.Node111 l1 x r)
+  | Chempty, None, Same => CC (PTree.Node001 r2)
+  | Chempty, None, Same1 => CC (PTree.Node001 r1)
+  | Chempty, None, Same2 => CC (PTree.Node001 r2)
+  | Chempty, None, CC0 => CC0
+  | Chempty, None, CC r => CC (PTree.Node001 r)
+  | Chempty, Some x, Same => if L.beq x x2 then CC (PTree.Node011 x2 r2) else CC (PTree.Node011 x r2)
+  | Chempty, Some x, Same1 => if L.beq x x2 then CC (PTree.Node011 x2 r1) else CC (PTree.Node011 x r1)
+  | Chempty, Some x, Same2 => if L.beq x x2 then Same2 else CC (PTree.Node011 x r2)
+  | Chempty, Some x, CC0 => if L.beq x x2 then CC (PTree.Node010 x2) else CC (PTree.Node010 x)
+  | Chempty, Some x, CC r =>  if L.beq x x2 then CC (PTree.Node011 x2 r) else CC (PTree.Node011 x r)
+  | Changed l, None, Same => CC (PTree.Node101 l r2)
+  | Changed l, None, Same1 => CC (PTree.Node101 l r1)
+  | Changed l, None, Same2 => CC (PTree.Node101 l r2)
+  | Changed l, None, CC0 => CC (PTree.Node100 l)
+  | Changed l, None, CC r => CC (PTree.Node101 l r)
+  | Changed l, Some x, Same => if L.beq x x2 then CC (PTree.Node111 l x2 r2) else CC (PTree.Node111 l x r2)
+  | Changed l, Some x, Same1 => if L.beq x x2 then CC (PTree.Node111 l x2 r1) else CC (PTree.Node111 l x r1)
+  | Changed l, Some x, Same2 => if L.beq x x2 then CC (PTree.Node111 l x2 r2) else CC (PTree.Node111 l x r2)
+  | Changed l, Some x, CC0 => if L.beq x x2 then CC (PTree.Node110 l x2) else CC (PTree.Node110 l x)
+  | Changed l, Some x, CC r => if L.beq x x2 then CC (PTree.Node111 l x2 r) else CC (PTree.Node111 l x r)
+ end
+ | PTree.Node101 l1 r1, PTree.Node100 l2 =>
+  match xcombine l1 l2, combine_l r1 with
+  | Same, Unchanged => Same1
+  | Same, Chempty => CC (PTree.Node100 l1)
+  | Same, Changed r => CC (PTree.Node101 l1 r)
+  | Same1, Unchanged => Same1
+  | Same1, Chempty => CC (PTree.Node100 l1)
+  | Same1, Changed r => CC (PTree.Node101 l1 r)
+  | Same2, Unchanged => CC (PTree.Node101 l2 r1)
+  | Same2, Chempty => Same2
+  | Same2, Changed r => CC (PTree.Node101 l2 r)
+  | CC0, Unchanged => CC (PTree.Node001 r1)
+  | CC0, Chempty => CC0
+  | CC0, Changed r => CC (PTree.Node001 r)
+  | CC l, Unchanged => CC (PTree.Node101 l r1)
+  | CC l, Chempty => CC (PTree.Node100 l)
+  | CC l, Changed r => CC (PTree.Node101 l r)
+  end
+ | PTree.Node101 l1 r1, PTree.Node101 l2 r2 =>
+  match xcombine l1 l2, xcombine r1 r2 with
+  | Same, Same => Same
+  | Same, Same1 => Same1
+  | Same, Same2 => Same2
+  | Same, CC0 => CC (PTree.Node100 l1)
+  | Same, CC r => CC (PTree.Node101 l1 r)
+  | Same1, Same => Same1
+  | Same1, Same1 => Same1
+  | Same1, Same2 => CC (PTree.Node101 l1 r2)
+  | Same1, CC0 => CC (PTree.Node100 l1)
+  | Same1, CC r => CC (PTree.Node101 l1 r)
+  | Same2, Same => Same2
+  | Same2, Same1 => CC (PTree.Node101 l2 r1)
+  | Same2, Same2 => Same2
+  | Same2, CC0 => CC (PTree.Node100 l2)
+  | Same2, CC r => CC (PTree.Node101 l2 r)
+  | CC0, Same => CC (PTree.Node001 r1)
+  | CC0, Same1 => CC (PTree.Node001 r1)
+  | CC0, Same2 => CC (PTree.Node001 r2)
+  | CC0, CC0 => CC0
+  | CC0, CC r => CC (PTree.Node001 r)
+  | CC l, Same => CC (PTree.Node101 l r1)
+  | CC l, Same1 => CC (PTree.Node101 l r1)
+  | CC l, Same2 => CC (PTree.Node101 l r2)
+  | CC l, CC0 => CC (PTree.Node100 l)
+  | CC l, CC r => CC (PTree.Node101 l r)
+  end
+ | PTree.Node101 l1 r1, PTree.Node110 l2 x2 =>
+  match xcombine l1 l2, f None (Some x2), combine_l r1 with
+  | Same, None, Unchanged => Same1
+  | Same, None, Chempty => CC (PTree.Node100 l1)
+  | Same, None, Changed r => CC (PTree.Node101 l1 r)
+  | Same, Some x, Unchanged => if L.beq x x2 then CC (PTree.Node111 l1 x2 r1) else CC (PTree.Node111 l1 x r1)
+  | Same, Some x, Chempty => if L.beq x x2 then CC (PTree.Node110 l1 x2) else CC (PTree.Node110 l1 x)
+  | Same, Some x, Changed r => if L.beq x x2 then CC (PTree.Node111 l1 x2 r) else CC (PTree.Node111 l1 x r)
+  | Same1, None, Unchanged => Same1
+  | Same1, None, Chempty => CC (PTree.Node100 l1)
+  | Same1, None, Changed r => CC (PTree.Node101 l1 r)
+  | Same1, Some x, Unchanged => if L.beq x x2 then CC (PTree.Node111 l1 x2 r1) else CC (PTree.Node111 l1 x r1)
+  | Same1, Some x, Chempty => if L.beq x x2 then CC (PTree.Node110 l1 x2) else CC (PTree.Node110 l1 x)
+  | Same1, Some x, Changed r => if L.beq x x2 then CC (PTree.Node111 l1 x2 r) else CC (PTree.Node111 l1 x r)
+  | Same2, None, Unchanged => CC (PTree.Node101 l2 r1)
+  | Same2, None, Chempty => CC (PTree.Node100 l2)
+  | Same2, None, Changed r => CC (PTree.Node101 l2 r)
+  | Same2, Some x, Unchanged => if L.beq x x2 then CC (PTree.Node111 l2 x2 r1) else CC (PTree.Node111 l2 x r1)
+  | Same2, Some x, Chempty => if L.beq x x2 then Same2 else CC (PTree.Node110 l2 x)
+  | Same2, Some x, Changed r => if L.beq x x2 then CC (PTree.Node111 l2 x2 r) else CC (PTree.Node111 l2 x r)
+  | CC0, None, Unchanged => CC (PTree.Node001 r1)
+  | CC0, None, Chempty => CC0
+  | CC0, None, Changed r => CC (PTree.Node001 r)
+  | CC0, Some x, Unchanged => if L.beq x x2 then CC (PTree.Node011 x2 r1) else CC (PTree.Node011 x r1)
+  | CC0, Some x, Chempty => if L.beq x x2 then CC (PTree.Node010 x2) else CC (PTree.Node010 x)
+  | CC0, Some x, Changed r => if L.beq x x2 then CC (PTree.Node011 x2 r) else CC (PTree.Node011 x r)
+  | CC l, None, Unchanged => CC (PTree.Node101 l r1)
+  | CC l, None, Chempty => CC (PTree.Node100 l)
+  | CC l, None, Changed r => CC (PTree.Node101 l r)
+  | CC l, Some x, Unchanged => if L.beq x x2 then CC (PTree.Node111 l x2 r1) else CC (PTree.Node111 l x r1)
+  | CC l, Some x, Chempty => if L.beq x x2 then CC (PTree.Node110 l x2) else CC (PTree.Node110 l x)
+  | CC l, Some x, Changed r => if L.beq x x2 then CC (PTree.Node111 l x2 r) else CC (PTree.Node111 l x r)
+  end
+ | PTree.Node101 l1 r1, PTree.Node111 l2 x2 r2 =>
+  match xcombine l1 l2, f None (Some x2), xcombine r1 r2 with
+  | Same, None, Same => Same1
+  | Same, None, Same1 => Same1
+  | Same, None, Same2 => CC (PTree.Node101 l2 r2)
+  | Same, None, CC0 => CC (PTree.Node100 l1)
+  | Same, None, CC r => CC (PTree.Node101 l2 r)
+  | Same, Some x, Same => if L.beq x x2 then Same2 else CC (PTree.Node111 l2 x r2)
+  | Same, Some x, Same1 => if L.beq x x2 then CC (PTree.Node111 l1 x2 r1) else CC (PTree.Node111 l1 x r1)
+  | Same, Some x, Same2 => if L.beq x x2 then Same2 else CC (PTree.Node111 l2 x r2)
+  | Same, Some x, CC0 => if L.beq x x2 then CC (PTree.Node110 l2 x2) else CC (PTree.Node110 l2 x)
+  | Same, Some x, CC r => if L.beq x x2 then CC (PTree.Node111 l2 x2 r) else CC (PTree.Node111 l2 x r)
+  | Same1, None, Same => Same1
+  | Same1, None, Same1 => Same1
+  | Same1, None, Same2 => CC (PTree.Node101 l1 r2)
+  | Same1, None, CC0 => CC (PTree.Node100 l1)
+  | Same1, None, CC r => CC (PTree.Node101 l1 r)
+  | Same1, Some x, Same => if L.beq x x2 then CC (PTree.Node111 l1 x2 r2) else CC (PTree.Node111 l1 x r2)
+  | Same1, Some x, Same1 => if L.beq x x2 then CC (PTree.Node111 l1 x2 r1) else CC (PTree.Node111 l1 x r1)
+  | Same1, Some x, Same2 => if L.beq x x2 then CC (PTree.Node111 l1 x2 r2) else CC (PTree.Node111 l1 x r2)
+  | Same1, Some x, CC0 => if L.beq x x2 then CC (PTree.Node110 l1 x2) else CC (PTree.Node110 l1 x)
+  | Same1, Some x, CC r => if L.beq x x2 then CC (PTree.Node111 l1 x2 r) else CC (PTree.Node111 l1 x r)
+  | Same2, None, Same => CC (PTree.Node101 l2 r2)
+  | Same2, None, Same1 => CC (PTree.Node101 l2 r1)
+  | Same2, None, Same2 => CC (PTree.Node101 l2 r2)
+  | Same2, None, CC0 =>CC (PTree.Node100 l2)
+  | Same2, None, CC r => CC (PTree.Node101 l2 r)
+  | Same2, Some x, Same => if L.beq x x2 then Same2 else CC (PTree.Node111 l2 x r2)
+  | Same2, Some x, Same1 => if L.beq x x2 then CC (PTree.Node111 l2 x2 r1) else CC (PTree.Node111 l2 x r1)
+  | Same2, Some x, Same2 => if L.beq x x2 then Same2 else CC (PTree.Node111 l2 x r2)
+  | Same2, Some x, CC0 => if L.beq x x2 then CC (PTree.Node110 l2 x2) else CC (PTree.Node110 l2 x)
+  | Same2, Some x, CC r => if L.beq x x2 then CC (PTree.Node111 l2 x2 r) else CC (PTree.Node111 l2 x r)
+  | CC0, None, Same => CC (PTree.Node001 r2)
+  | CC0, None, Same1 => CC (PTree.Node001 r1)
+  | CC0, None, Same2 => CC (PTree.Node001 r2)
+  | CC0, None, CC0 => CC0
+  | CC0, None, CC r => CC (PTree.Node001 r)
+  | CC0, Some x, Same => if L.beq x x2 then CC (PTree.Node011 x2 r2) else CC (PTree.Node011 x r2)
+  | CC0, Some x, Same1 => if L.beq x x2 then CC (PTree.Node011 x2 r1) else CC (PTree.Node011 x r1)
+  | CC0, Some x, Same2 => if L.beq x x2 then CC (PTree.Node011 x2 r2) else CC (PTree.Node011 x r2)
+  | CC0, Some x, CC0 => if L.beq x x2 then CC (PTree.Node010 x2) else CC (PTree.Node010 x)
+  | CC0, Some x, CC r => if L.beq x x2 then CC (PTree.Node011 x2 r) else CC (PTree.Node011 x r)
+  | CC l, None, Same => CC (PTree.Node101 l r2)
+  | CC l, None, Same1 => CC (PTree.Node101 l r1)
+  | CC l, None, Same2 => CC (PTree.Node101 l r2)
+  | CC l, None, CC0 => CC (PTree.Node100 l)
+  | CC l, None, CC r => CC (PTree.Node101 l r)
+  | CC l, Some x, Same => if L.beq x x2 then CC (PTree.Node111 l x2 r2) else CC (PTree.Node111 l x r2)
+  | CC l, Some x, Same1 => if L.beq x x2 then CC (PTree.Node111 l x2 r1) else CC (PTree.Node111 l x r1)
+  | CC l, Some x, Same2 => if L.beq x x2 then CC (PTree.Node111 l x2 r2) else CC (PTree.Node111 l x r2)
+  | CC l, Some x, CC0 => if L.beq x x2 then CC (PTree.Node110 l x2) else CC (PTree.Node110 l x)
+  | CC l, Some x, CC r => if L.beq x x2 then CC (PTree.Node111 l x2 r) else CC (PTree.Node111 l x r)
+  end
+ | PTree.Node110 l1 x1, PTree.Node001 r2 =>
+  match combine_l l1, f (Some x1) None, combine_r r2 with
+  | Unchanged, None, Unchanged => CC (PTree.Node101 l1 r2)
+  | Unchanged, None, Chempty => CC (PTree.Node100 l1)
+  | Unchanged, None, Changed r => CC (PTree.Node101 l1 r)
+  | Unchanged, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node111 l1 x1 r2) else CC (PTree.Node111 l1 x r2)
+  | Unchanged, Some x, Chempty => if L.beq x x1 then Same1 else CC (PTree.Node110 l1 x)
+  | Unchanged, Some x, Changed r => if L.beq x x1 then CC (PTree.Node111 l1 x1 r) else CC (PTree.Node111 l1 x r)
+  | Chempty, None, Unchanged => Same2
+  | Chempty, None, Chempty => CC0
+  | Chempty, None, Changed r => CC (PTree.Node001 r)
+  | Chempty, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node011 x1 r2) else CC (PTree.Node011 x r2)
+  | Chempty, Some x, Chempty => if L.beq x x1 then CC (PTree.Node010 x1) else CC (PTree.Node010 x)
+  | Chempty, Some x, Changed r => if L.beq x x1 then CC (PTree.Node011 x1 r) else CC (PTree.Node011 x r)
+  | Changed l, None, Unchanged => CC (PTree.Node101 l r2)
+  | Changed l, None, Chempty => CC (PTree.Node100 l)
+  | Changed l, None, Changed r => CC (PTree.Node101 l r)
+  | Changed l, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node111 l x1 r2) else CC (PTree.Node111 l x r2)
+  | Changed l, Some x, Chempty => if L.beq x x1 then CC (PTree.Node110 l x1) else CC (PTree.Node110 l x)
+  | Changed l, Some x, Changed r => if L.beq x x1 then CC (PTree.Node111 l x1 r) else CC (PTree.Node111 l x r)
+  end
+ | PTree.Node110 l1 x1, PTree.Node010 x2 =>
+  match combine_l l1, f (Some x1) (Some x2) with
+  | Unchanged, None => CC (PTree.Node100 l1)
+  | Unchanged, Some x => if L.beq x x1 then Same1 else if L.beq x x2 then CC (PTree.Node110 l1 x2) else CC (PTree.Node110 l1 x)
+  | Chempty, None => CC0
+  | Chempty, Some x => if L.beq x x1 then CC (PTree.Node010 x1) else if L.beq x x2 then Same2 else CC (PTree.Node010 x)
+  | Changed l, None => CC (PTree.Node100 l)
+  | Changed l, Some x => if L.beq x x1 then CC (PTree.Node110 l x1) else if L.beq x x2 then CC (PTree.Node110 l x2) else CC (PTree.Node110 l x)
+  end
+ | PTree.Node110 l1 x1, PTree.Node011 x2 r2 =>
+  match combine_l l1, f (Some x1) (Some x2), combine_r r2 with
+  | Unchanged, None, Unchanged => CC (PTree.Node101 l1 r2)
+  | Unchanged, None, Chempty => CC (PTree.Node100 l1)
+  | Unchanged, None, Changed r => CC (PTree.Node101 l1 r)
+  | Unchanged, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node111 l1 x1 r2) else if L.beq x x2 then CC (PTree.Node111 l1 x2 r2) else CC (PTree.Node111 l1 x r2)
+  | Unchanged, Some x, Chempty => if L.beq x x1 then Same1 else if L.beq x x2 then CC (PTree.Node110 l1 x2) else CC (PTree.Node110 l1 x)
+  | Unchanged, Some x, Changed r => if L.beq x x1 then CC (PTree.Node111 l1 x1 r) else if L.beq x x2 then CC (PTree.Node111 l1 x2 r) else CC (PTree.Node111 l1 x r)
+  | Chempty, None, Unchanged => CC (PTree.Node001 r2)
+  | Chempty, None, Chempty => CC0
+  | Chempty, None, Changed r => CC (PTree.Node001 r)
+  | Chempty, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node011 x1 r2) else if L.beq x x2 then Same2 else CC (PTree.Node011 x r2)
+  | Chempty, Some x, Chempty => if L.beq x x1 then CC (PTree.Node010 x1) else if L.beq x x2 then CC (PTree.Node010 x2) else CC (PTree.Node010 x)
+  | Chempty, Some x, Changed r => if L.beq x x1 then CC (PTree.Node011 x1 r) else if L.beq x x2 then CC (PTree.Node011 x2 r) else  CC (PTree.Node011 x r)
+  | Changed l, None, Unchanged => CC (PTree.Node101 l r2)
+  | Changed l, None, Chempty => CC (PTree.Node100 l)
+  | Changed l, None, Changed r => CC (PTree.Node101 l r)
+  | Changed l, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node111 l x1 r2) else if L.beq x x2 then CC (PTree.Node111 l x2 r2) else CC (PTree.Node111 l x r2)
+  | Changed l, Some x, Chempty => if L.beq x x1 then CC (PTree.Node110 l x1) else if L.beq x x2 then CC (PTree.Node110 l x2) else CC (PTree.Node110 l x)
+  | Changed l, Some x, Changed r => if L.beq x x1 then CC (PTree.Node111 l x1 r) else if L.beq x x2 then CC (PTree.Node111 l x2 r) else CC (PTree.Node111 l x r)
+  end
+ | PTree.Node110 l1 x1, PTree.Node100 l2 =>
+  match xcombine l1 l2, f (Some x1) None with
+  | Same, None => Same2
+  | Same, Some x => if L.beq x x1 then Same1 else CC (PTree.Node110 l1 x)
+  | Same1, None => CC (PTree.Node100 l1)
+  | Same1, Some x => if L.beq x x1 then Same1 else CC (PTree.Node110 l1 x)
+  | Same2, None => Same2
+  | Same2, Some x => if L.beq x x1 then CC (PTree.Node110 l2 x1) else CC (PTree.Node110 l2 x)
+  | CC0, None => CC0
+  | CC0, Some x => if L.beq x x1 then CC (PTree.Node010 x1) else CC (PTree.Node010 x)
+  | CC l, None => CC (PTree.Node100 l)
+  | CC l, Some x => if L.beq x x1 then CC (PTree.Node110 l x1) else CC (PTree.Node110 l x)
+  end
+ | PTree.Node110 l1 x1, PTree.Node101 l2 r2 => 
+  match xcombine l1 l2, f (Some x1) None, combine_r r2 with
+  | Same, None, Unchanged => Same2
+  | Same, None, Chempty => CC (PTree.Node100 l1)
+  | Same, None, Changed r => CC (PTree.Node101 l1 r)
+  | Same, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node111 l1 x1 r2) else CC (PTree.Node111 l1 x r2)
+  | Same, Some x, Chempty => if L.beq x x1 then Same1 else CC (PTree.Node110 l1 x)
+  | Same, Some x, Changed r => if L.beq x x1 then CC (PTree.Node111 l1 x1 r) else CC (PTree.Node111 l1 x r)
+  | Same1, None, Unchanged => CC (PTree.Node101 l1 r2)
+  | Same1, None, Chempty => CC (PTree.Node100 l1)
+  | Same1, None, Changed r => CC (PTree.Node101 l1 r)
+  | Same1, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node111 l1 x1 r2) else CC (PTree.Node111 l1 x r2)
+  | Same1, Some x, Chempty => if L.beq x x1 then Same1 else CC (PTree.Node110 l1 x)
+  | Same1, Some x, Changed r => if L.beq x x1 then CC (PTree.Node111 l1 x1 r) else CC (PTree.Node111 l1 x r)
+  | Same2, None, Unchanged => Same2
+  | Same2, None, Chempty => CC (PTree.Node100 l2)
+  | Same2, None, Changed r => CC (PTree.Node101 l2 r)
+  | Same2, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node111 l2 x1 r2) else CC (PTree.Node111 l2 x r2)
+  | Same2, Some x, Chempty => if L.beq x x1 then CC (PTree.Node110 l2 x1) else CC (PTree.Node110 l2 x)
+  | Same2, Some x, Changed r => if L.beq x x1 then CC (PTree.Node111 l2 x1 r) else CC (PTree.Node111 l2 x r)
+  | CC0, None, Unchanged => CC (PTree.Node001 r2)
+  | CC0, None, Chempty => CC0
+  | CC0, None, Changed r => CC (PTree.Node001 r)
+  | CC0, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node011 x1 r2) else CC (PTree.Node011 x r2)
+  | CC0, Some x, Chempty => if L.beq x x1 then CC (PTree.Node010 x1) else CC (PTree.Node010 x)
+  | CC0, Some x, Changed r => if L.beq x x1 then CC (PTree.Node011 x1 r) else CC (PTree.Node011 x r)
+  | CC l, None, Unchanged => CC (PTree.Node101 l r2)
+  | CC l, None, Chempty => CC (PTree.Node100 l)
+  | CC l, None, Changed r => CC (PTree.Node101 l r)
+  | CC l, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node111 l x1 r2) else CC (PTree.Node111 l x r2)
+  | CC l, Some x, Chempty => if L.beq x x1 then CC (PTree.Node110 l x1) else CC (PTree.Node110 l x)
+  | CC l, Some x, Changed r => if L.beq x x1 then CC (PTree.Node111 l x1 r) else CC (PTree.Node111 l x r)
+  end
+ | PTree.Node110 l1 x1, PTree.Node110 l2 x2 =>
+  match xcombine l1 l2, f (Some x1) (Some x2) with
+  | Same, None => CC (PTree.Node100 l1)
+  | Same, Some x => if L.beq x x1 then Same1 else if L.beq x x2 then Same2 else CC (PTree.Node110 l1 x)
+  | Same1, None => CC (PTree.Node100 l1)
+  | Same1, Some x => if L.beq x x1 then Same1 else if L.beq x x2 then CC (PTree.Node110 l1 x2) else CC (PTree.Node110 l1 x)
+  | Same2, None => CC (PTree.Node100 l2)
+  | Same2, Some x => if L.beq x x1 then CC (PTree.Node110 l2 x1) else if L.beq x x2 then Same2 else CC (PTree.Node110 l2 x)
+  | CC0, None => CC0
+  | CC0, Some x => if L.beq x x1 then CC (PTree.Node010 x1) else if L.beq x x2 then CC (PTree.Node010 x2) else CC (PTree.Node010 x)
+  | CC l, None => CC (PTree.Node100 l)
+  | CC l, Some x => if L.beq x x1 then CC (PTree.Node110 l x1) else if L.beq x x2 then CC (PTree.Node110 l x2) else CC (PTree.Node110 l x)
+  end
+ | PTree.Node110 l1 x1, PTree.Node111 l2 x2 r2 =>
+  match xcombine l1 l2, f (Some x1) (Some x2), combine_r r2 with
+  | Same, None, Unchanged => CC (PTree.Node101 l2 r2)
+  | Same, None, Chempty => CC (PTree.Node100 l1)
+  | Same, None, Changed r => CC (PTree.Node101 l1 r)
+  | Same, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node111 l1 x1 r2) else if L.beq x x2 then Same2 else CC (PTree.Node111 l1 x r2)
+  | Same, Some x, Chempty => if L.beq x x1 then Same1 else if L.beq x x2 then CC (PTree.Node110 l1 x2) else CC (PTree.Node110 l1 x)
+  | Same, Some x, Changed r => if L.beq x x1 then CC (PTree.Node111 l1 x1 r) else if L.beq x x2 then CC (PTree.Node111 l1 x2 r) else CC (PTree.Node111 l1 x r)
+  | Same1, None, Unchanged => CC (PTree.Node101 l1 r2)
+  | Same1, None, Chempty => CC (PTree.Node100 l1)
+  | Same1, None, Changed r => CC (PTree.Node101 l1 r)
+  | Same1, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node111 l1 x1 r2) else if L.beq x x2 then CC (PTree.Node111 l1 x2 r2) else CC (PTree.Node111 l1 x r2)
+  | Same1, Some x, Chempty => if L.beq x x1 then Same1 else if L.beq x x2 then CC (PTree.Node110 l1 x2) else CC (PTree.Node110 l1 x)
+  | Same1, Some x, Changed r => if L.beq x x1 then CC (PTree.Node111 l1 x1 r) else if L.beq x x2 then CC (PTree.Node111 l1 x2 r) else CC (PTree.Node111 l1 x r)
+  | Same2, None, Unchanged => CC (PTree.Node101 l2 r2)
+  | Same2, None, Chempty => CC (PTree.Node100 l2)
+  | Same2, None, Changed r => CC (PTree.Node101 l2 r)
+  | Same2, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node111 l2 x1 r2) else if L.beq x x2 then Same2 else CC (PTree.Node111 l2 x r2)
+  | Same2, Some x, Chempty => if L.beq x x1 then CC (PTree.Node110 l2 x1) else if L.beq x x2 then CC (PTree.Node110 l2 x2) else CC (PTree.Node110 l2 x)
+  | Same2, Some x, Changed r => if L.beq x x1 then CC (PTree.Node111 l2 x1 r) else if L.beq x x2 then CC (PTree.Node111 l2 x2 r) else CC (PTree.Node111 l2 x r)
+  | CC0, None, Unchanged => CC (PTree.Node001 r2)
+  | CC0, None, Chempty => CC0
+  | CC0, None, Changed r => CC (PTree.Node001 r)
+  | CC0, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node011 x1 r2) else if L.beq x x2 then CC (PTree.Node011 x2 r2) else CC (PTree.Node011 x r2)
+  | CC0, Some x, Chempty => if L.beq x x1 then CC (PTree.Node010 x1) else if L.beq x x2 then CC (PTree.Node010 x2) else CC (PTree.Node010 x)
+  | CC0, Some x, Changed r => if L.beq x x1 then CC (PTree.Node011 x1 r) else if L.beq x x2 then CC (PTree.Node011 x2 r) else CC (PTree.Node011 x r)
+  | CC l, None, Unchanged => CC (PTree.Node101 l r2)
+  | CC l, None, Chempty => CC (PTree.Node100 l)
+  | CC l, None, Changed r => CC (PTree.Node101 l r)
+  | CC l, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node111 l x1 r2) else if L.beq x x2 then CC (PTree.Node111 l x2 r2) else CC (PTree.Node111 l x r2)
+  | CC l, Some x, Chempty => if L.beq x x1 then CC (PTree.Node110 l x1) else if L.beq x x2 then CC (PTree.Node110 l x2) else CC (PTree.Node110 l x)
+  | CC l, Some x, Changed r => if L.beq x x1 then CC (PTree.Node111 l x1 r) else if L.beq x x2 then CC (PTree.Node111 l x2 r) else CC (PTree.Node111 l x r)
+  end
+ | PTree.Node111 l1 x1 r1, PTree.Node001 r2 =>
+  match combine_l l1, f (Some x1) None, xcombine r1 r2 with
+  | Unchanged, None, Same => CC (PTree.Node101 l1 r1)
+  | Unchanged, None, Same1 => CC (PTree.Node101 l1 r1)
+  | Unchanged, None, Same2 => CC (PTree.Node101 l1 r2)
+  | Unchanged, None, CC0 => CC (PTree.Node100 l1)
+  | Unchanged, None, CC r => CC (PTree.Node101 l1 r)
+  | Unchanged, Some x, Same => if L.beq x x1 then Same1 else CC (PTree.Node111 l1 x r1)
+  | Unchanged, Some x, Same1 => if L.beq x x1 then Same1 else CC (PTree.Node111 l1 x r1)
+  | Unchanged, Some x, Same2 => if L.beq x x1 then CC (PTree.Node111 l1 x1 r2) else CC (PTree.Node111 l1 x r2)
+  | Unchanged, Some x, CC0 => if L.beq x x1 then CC (PTree.Node110 l1 x1) else CC (PTree.Node110 l1 x)
+  | Unchanged, Some x, CC r => if L.beq x x1 then CC (PTree.Node111 l1 x1 r) else CC (PTree.Node111 l1 x r)
+  | Chempty, None, Same => Same2
+  | Chempty, None, Same1 => CC (PTree.Node001 r1)
+  | Chempty, None, Same2 => Same2
+  | Chempty, None, CC0 => CC0
+  | Chempty, None, CC r => CC (PTree.Node001 r)
+  | Chempty, Some x, Same => if L.beq x x1 then CC (PTree.Node011 x1 r2) else CC (PTree.Node011 x r2)
+  | Chempty, Some x, Same1 => if L.beq x x1 then CC (PTree.Node011 x1 r1) else CC (PTree.Node011 x r1)
+  | Chempty, Some x, Same2 => if L.beq x x1 then CC (PTree.Node011 x1 r2) else CC (PTree.Node011 x r2)
+  | Chempty, Some x, CC0 => if L.beq x x1 then CC (PTree.Node010 x1) else CC (PTree.Node010 x)
+  | Chempty, Some x, CC r =>  if L.beq x x1 then CC (PTree.Node011 x1 r) else CC (PTree.Node011 x r)
+  | Changed l, None, Same => CC (PTree.Node101 l r2)
+  | Changed l, None, Same1 => CC (PTree.Node101 l r1)
+  | Changed l, None, Same2 => CC (PTree.Node101 l r2)
+  | Changed l, None, CC0 => CC (PTree.Node100 l)
+  | Changed l, None, CC r => CC (PTree.Node101 l r)
+  | Changed l, Some x, Same => if L.beq x x1 then CC (PTree.Node111 l x1 r2) else CC (PTree.Node111 l x r2)
+  | Changed l, Some x, Same1 => if L.beq x x1 then CC (PTree.Node111 l x1 r1) else CC (PTree.Node111 l x r1)
+  | Changed l, Some x, Same2 => if L.beq x x1 then CC (PTree.Node111 l x1 r2) else CC (PTree.Node111 l x r2)
+  | Changed l, Some x, CC0 => if L.beq x x1 then CC (PTree.Node110 l x1) else CC (PTree.Node110 l x)
+  | Changed l, Some x, CC r => if L.beq x x1 then CC (PTree.Node111 l x1 r) else CC (PTree.Node111 l x r)
+ end
+ | PTree.Node111 l1 x1 r1, PTree.Node010 x2 =>
+  match combine_l l1, f (Some x1) (Some x2), combine_l r1 with
+  | Unchanged, None, Unchanged => CC (PTree.Node101 l1 r1)
+  | Unchanged, None, Chempty => CC (PTree.Node100 l1)
+  | Unchanged, None, Changed r => CC (PTree.Node101 l1 r)
+  | Unchanged, Some x, Unchanged => if L.beq x x1 then Same1 else if L.beq x x2 then CC (PTree.Node111 l1 x2 r1) else CC (PTree.Node111 l1 x r1)
+  | Unchanged, Some x, Chempty => if L.beq x x1 then CC (PTree.Node110 l1 x1) else if L.beq x x2 then CC (PTree.Node110 l1 x2) else CC (PTree.Node110 l1 x)
+  | Unchanged, Some x, Changed r => if L.beq x x1 then CC (PTree.Node111 l1 x1 r) else if L.beq x x2 then CC (PTree.Node111 l1 x2 r) else CC (PTree.Node111 l1 x r)
+  | Chempty, None, Unchanged => CC (PTree.Node001 r1)
+  | Chempty, None, Chempty => CC0
+  | Chempty, None, Changed r => CC (PTree.Node001 r)
+  | Chempty, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node011 x1 r1) else if L.beq x x2 then CC (PTree.Node011 x2 r1) else CC (PTree.Node011 x r1)
+  | Chempty, Some x, Chempty => if L.beq x x2 then Same2 else CC (PTree.Node010 x)
+  | Chempty, Some x, Changed r => if L.beq x x1 then CC (PTree.Node011 x1 r) else if L.beq x x2 then CC (PTree.Node011 x2 r) else CC (PTree.Node011 x r)
+  | Changed l, None, Unchanged => CC (PTree.Node101 l r1)
+  | Changed l, None, Chempty => CC (PTree.Node100 l)
+  | Changed l, None, Changed r => CC (PTree.Node101 l r)
+  | Changed l, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node111 l x1 r1) else if L.beq x x2 then CC (PTree.Node111 l x2 r1) else CC (PTree.Node111 l x r1)
+  | Changed l, Some x, Chempty => if L.beq x x1 then CC (PTree.Node110 l x1) else if L.beq x x2 then CC (PTree.Node110 l x2) else CC (PTree.Node110 l x)
+  | Changed l, Some x, Changed r => if L.beq x x1 then CC (PTree.Node111 l x1 r) else if L.beq x x2 then CC (PTree.Node111 l x2 r) else CC (PTree.Node111 l x r)
+  end
+ | PTree.Node111 l1 x1 r1, PTree.Node011 x2 r2 =>
+  match combine_l l1, f (Some x1) (Some x2), xcombine r1 r2 with
+  | Unchanged, None, Same => CC (PTree.Node101 l1 r1)
+  | Unchanged, None, Same1 => CC (PTree.Node101 l1 r1)
+  | Unchanged, None, Same2 => CC (PTree.Node101 l1 r2)
+  | Unchanged, None, CC0 => CC (PTree.Node100 l1)
+  | Unchanged, None, CC r => CC (PTree.Node101 l1 r)
+  | Unchanged, Some x, Same => if L.beq x x1 then Same1 else if L.beq x x2 then CC (PTree.Node111 l1 x2 r2) else CC (PTree.Node111 l1 x r1)
+  | Unchanged, Some x, Same1 => if L.beq x x1 then Same1 else if L.beq x x2 then CC (PTree.Node111 l1 x2 r1) else CC (PTree.Node111 l1 x r1)
+  | Unchanged, Some x, Same2 => if L.beq x x1 then CC (PTree.Node111 l1 x1 r2) else if L.beq x x2 then CC (PTree.Node111 l1 x2 r2) else CC (PTree.Node111 l1 x r2)
+  | Unchanged, Some x, CC0 => if L.beq x x1 then CC (PTree.Node110 l1 x1) else if L.beq x x2 then CC (PTree.Node110 l1 x2) else CC (PTree.Node110 l1 x)
+  | Unchanged, Some x, CC r => if L.beq x x1 then CC (PTree.Node111 l1 x1 r) else if L.beq x x2 then CC (PTree.Node111 l1 x2 r) else CC (PTree.Node111 l1 x r)
+  | Chempty, None, Same => CC (PTree.Node001 r2)
+  | Chempty, None, Same1 => CC (PTree.Node001 r1)
+  | Chempty, None, Same2 => CC (PTree.Node001 r2)
+  | Chempty, None, CC0 => CC0
+  | Chempty, None, CC r => CC (PTree.Node001 r)
+  | Chempty, Some x, Same => if L.beq x x1 then CC (PTree.Node011 x1 r2) else if L.beq x x2 then Same2 else CC (PTree.Node011 x r2)
+  | Chempty, Some x, Same1 => if L.beq x x1 then CC (PTree.Node011 x1 r1) else if L.beq x x2 then CC (PTree.Node011 x2 r1) else CC (PTree.Node011 x r1)
+  | Chempty, Some x, Same2 => if L.beq x x1 then CC (PTree.Node011 x1 r2) else if L.beq x x2 then Same2 else CC (PTree.Node011 x r2)
+  | Chempty, Some x, CC0 => if L.beq x x1 then CC (PTree.Node010 x1) else if L.beq x x2 then CC (PTree.Node010 x2) else CC (PTree.Node010 x)
+  | Chempty, Some x, CC r =>  if L.beq x x1 then CC (PTree.Node011 x1 r) else if L.beq x x2 then CC (PTree.Node011 x2 r) else CC (PTree.Node011 x r)
+  | Changed l, None, Same => CC (PTree.Node101 l r2)
+  | Changed l, None, Same1 => CC (PTree.Node101 l r1)
+  | Changed l, None, Same2 => CC (PTree.Node101 l r2)
+  | Changed l, None, CC0 => CC (PTree.Node100 l)
+  | Changed l, None, CC r => CC (PTree.Node101 l r)
+  | Changed l, Some x, Same => if L.beq x x1 then CC (PTree.Node111 l x1 r2) else if L.beq x x2 then CC (PTree.Node111 l x2 r2) else CC (PTree.Node111 l x r2)
+  | Changed l, Some x, Same1 => if L.beq x x1 then CC (PTree.Node111 l x1 r1) else if L.beq x x2 then CC (PTree.Node111 l x2 r1) else CC (PTree.Node111 l x r1)
+  | Changed l, Some x, Same2 => if L.beq x x1 then CC (PTree.Node111 l x1 r2) else if L.beq x x2 then CC (PTree.Node111 l x2 r2) else CC (PTree.Node111 l x r2)
+  | Changed l, Some x, CC0 => if L.beq x x1 then CC (PTree.Node110 l x1) else if L.beq x x2 then CC (PTree.Node110 l x2) else CC (PTree.Node110 l x)
+  | Changed l, Some x, CC r => if L.beq x x1 then CC (PTree.Node111 l x1 r) else if L.beq x x2 then CC (PTree.Node111 l x2 r) else CC (PTree.Node111 l x r)
+ end
+ | PTree.Node111 l1 x1 r1, PTree.Node100 l2 =>
+  match xcombine l1 l2, f (Some x1) None, combine_l r1 with
+  | Same, None, Unchanged => CC (PTree.Node101 l1 r1)
+  | Same, None, Chempty => CC (PTree.Node100 l1)
+  | Same, None, Changed r => CC (PTree.Node101 l1 r)
+  | Same, Some x, Unchanged => if L.beq x x1 then Same1 else CC (PTree.Node111 l1 x r1)
+  | Same, Some x, Chempty => if L.beq x x1 then CC (PTree.Node110 l1 x1) else CC (PTree.Node110 l1 x)
+  | Same, Some x, Changed r => if L.beq x x1 then CC (PTree.Node111 l1 x1 r) else CC (PTree.Node111 l1 x r)
+  | Same1, None, Unchanged => CC (PTree.Node101 l1 r1)
+  | Same1, None, Chempty => CC (PTree.Node100 l1)
+  | Same1, None, Changed r => CC (PTree.Node101 l1 r)
+  | Same1, Some x, Unchanged => if L.beq x x1 then Same1 else CC (PTree.Node111 l1 x r1)
+  | Same1, Some x, Chempty => if L.beq x x1 then CC (PTree.Node110 l1 x1) else CC (PTree.Node110 l1 x)
+  | Same1, Some x, Changed r => if L.beq x x1 then CC (PTree.Node111 l1 x1 r) else CC (PTree.Node111 l1 x r)
+  | Same2, None, Unchanged => CC (PTree.Node101 l2 r1)
+  | Same2, None, Chempty => CC (PTree.Node100 l2)
+  | Same2, None, Changed r => CC (PTree.Node101 l2 r)
+  | Same2, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node111 l2 x1 r1) else CC (PTree.Node111 l2 x r1)
+  | Same2, Some x, Chempty => if L.beq x x1 then CC (PTree.Node110 l2 x1) else CC (PTree.Node110 l2 x)
+  | Same2, Some x, Changed r => if L.beq x x1 then CC (PTree.Node111 l2 x1 r) else CC (PTree.Node111 l2 x r)
+  | CC0, None, Unchanged => CC (PTree.Node001 r1)
+  | CC0, None, Chempty => CC0
+  | CC0, None, Changed r => CC (PTree.Node001 r)
+  | CC0, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node011 x1 r1) else CC (PTree.Node011 x r1)
+  | CC0, Some x, Chempty => if L.beq x x1 then CC (PTree.Node010 x1) else CC (PTree.Node010 x)
+  | CC0, Some x, Changed r => if L.beq x x1 then CC (PTree.Node011 x1 r) else CC (PTree.Node011 x r)
+  | CC l, None, Unchanged => CC (PTree.Node101 l r1)
+  | CC l, None, Chempty => CC (PTree.Node100 l)
+  | CC l, None, Changed r => CC (PTree.Node101 l r)
+  | CC l, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node111 l x1 r1) else CC (PTree.Node111 l x r1)
+  | CC l, Some x, Chempty => if L.beq x x1 then CC (PTree.Node110 l x1) else CC (PTree.Node110 l x)
+  | CC l, Some x, Changed r => if L.beq x x1 then CC (PTree.Node111 l x1 r) else CC (PTree.Node111 l x r)
+  end
+ | PTree.Node111 l1 x1 r1, PTree.Node101 l2 r2 =>
+  match xcombine l1 l2, f (Some x1) None, xcombine r1 r2 with
+  | Same, None, Same => Same2
+  | Same, None, Same1 => CC (PTree.Node101 l1 r1)
+  | Same, None, Same2 => Same2
+  | Same, None, CC0 => CC (PTree.Node100 l1)
+  | Same, None, CC r => CC (PTree.Node101 l2 r)
+  | Same, Some x, Same => if L.beq x x1 then Same1 else CC (PTree.Node111 l2 x r2)
+  | Same, Some x, Same1 => if L.beq x x1 then Same1 else CC (PTree.Node111 l1 x r1)
+  | Same, Some x, Same2 => if L.beq x x1 then CC (PTree.Node111 l2 x1 r2) else CC (PTree.Node111 l2 x r2)
+  | Same, Some x, CC0 => if L.beq x x1 then CC (PTree.Node110 l2 x1) else CC (PTree.Node110 l2 x)
+  | Same, Some x, CC r => if L.beq x x1 then CC (PTree.Node111 l2 x1 r) else CC (PTree.Node111 l2 x r)
+  | Same1, None, Same => CC (PTree.Node101 l1 r1)
+  | Same1, None, Same1 => CC (PTree.Node101 l1 r1)
+  | Same1, None, Same2 => CC (PTree.Node101 l1 r2)
+  | Same1, None, CC0 => CC (PTree.Node100 l1)
+  | Same1, None, CC r => CC (PTree.Node101 l1 r)
+  | Same1, Some x, Same => if L.beq x x1 then Same1 else CC (PTree.Node111 l1 x r2)
+  | Same1, Some x, Same1 => if L.beq x x1 then Same1 else CC (PTree.Node111 l1 x r1)
+  | Same1, Some x, Same2 => if L.beq x x1 then CC (PTree.Node111 l1 x1 r2) else CC (PTree.Node111 l1 x r2)
+  | Same1, Some x, CC0 => if L.beq x x1 then CC (PTree.Node110 l1 x1) else CC (PTree.Node110 l1 x)
+  | Same1, Some x, CC r => if L.beq x x1 then CC (PTree.Node111 l1 x1 r) else CC (PTree.Node111 l1 x r)
+  | Same2, None, Same => CC (PTree.Node101 l2 r2)
+  | Same2, None, Same1 => CC (PTree.Node101 l2 r1)
+  | Same2, None, Same2 => CC (PTree.Node101 l2 r2)
+  | Same2, None, CC0 =>CC (PTree.Node100 l2)
+  | Same2, None, CC r => CC (PTree.Node101 l2 r)
+  | Same2, Some x, Same => if L.beq x x1 then CC (PTree.Node111 l2 x1 r2) else CC (PTree.Node111 l2 x r2)
+  | Same2, Some x, Same1 => if L.beq x x1 then CC (PTree.Node111 l2 x1 r1) else CC (PTree.Node111 l2 x r1)
+  | Same2, Some x, Same2 => if L.beq x x1 then CC (PTree.Node111 l2 x1 r2) else CC (PTree.Node111 l2 x r2)
+  | Same2, Some x, CC0 => if L.beq x x1 then CC (PTree.Node110 l2 x1) else CC (PTree.Node110 l2 x)
+  | Same2, Some x, CC r => if L.beq x x1 then CC (PTree.Node111 l2 x1 r) else CC (PTree.Node111 l2 x r)
+  | CC0, None, Same => CC (PTree.Node001 r2)
+  | CC0, None, Same1 => CC (PTree.Node001 r1)
+  | CC0, None, Same2 => CC (PTree.Node001 r2)
+  | CC0, None, CC0 => CC0
+  | CC0, None, CC r => CC (PTree.Node001 r)
+  | CC0, Some x, Same => if L.beq x x1 then CC (PTree.Node011 x1 r2) else CC (PTree.Node011 x r2)
+  | CC0, Some x, Same1 => if L.beq x x1 then CC (PTree.Node011 x1 r1) else CC (PTree.Node011 x r1)
+  | CC0, Some x, Same2 => if L.beq x x1 then CC (PTree.Node011 x1 r2) else CC (PTree.Node011 x r2)
+  | CC0, Some x, CC0 => if L.beq x x1 then CC (PTree.Node010 x1) else CC (PTree.Node010 x)
+  | CC0, Some x, CC r => if L.beq x x1 then CC (PTree.Node011 x1 r) else CC (PTree.Node011 x r)
+  | CC l, None, Same => CC (PTree.Node101 l r2)
+  | CC l, None, Same1 => CC (PTree.Node101 l r1)
+  | CC l, None, Same2 => CC (PTree.Node101 l r2)
+  | CC l, None, CC0 => CC (PTree.Node100 l)
+  | CC l, None, CC r => CC (PTree.Node101 l r)
+  | CC l, Some x, Same => if L.beq x x1 then CC (PTree.Node111 l x1 r2) else CC (PTree.Node111 l x r2)
+  | CC l, Some x, Same1 => if L.beq x x1 then CC (PTree.Node111 l x1 r1) else CC (PTree.Node111 l x r1)
+  | CC l, Some x, Same2 => if L.beq x x1 then CC (PTree.Node111 l x1 r2) else CC (PTree.Node111 l x r2)
+  | CC l, Some x, CC0 => if L.beq x x1 then CC (PTree.Node110 l x1) else CC (PTree.Node110 l x)
+  | CC l, Some x, CC r => if L.beq x x1 then CC (PTree.Node111 l x1 r) else CC (PTree.Node111 l x r)
+  end
+ | PTree.Node111 l1 x1 r1, PTree.Node110 l2 x2 =>
+  match xcombine l1 l2, f (Some x1) (Some x2), combine_l r1 with
+  | Same, None, Unchanged => CC (PTree.Node101 l1 r1)
+  | Same, None, Chempty => CC (PTree.Node100 l1)
+  | Same, None, Changed r => CC (PTree.Node101 l1 r)
+  | Same, Some x, Unchanged => if L.beq x x1 then Same1 else if L.beq x x2 then CC (PTree.Node111 l1 x2 r1) else CC (PTree.Node111 l1 x r1)
+  | Same, Some x, Chempty => if L.beq x x1 then CC (PTree.Node110 l1 x1) else if L.beq x x2 then Same2 else CC (PTree.Node110 l1 x)
+  | Same, Some x, Changed r => if L.beq x x1 then CC (PTree.Node111 l1 x1 r) else if L.beq x x2 then CC (PTree.Node111 l1 x2 r) else CC (PTree.Node111 l1 x r)
+  | Same1, None, Unchanged => CC (PTree.Node101 l1 r1)
+  | Same1, None, Chempty => CC (PTree.Node100 l1)
+  | Same1, None, Changed r => CC (PTree.Node101 l1 r)
+  | Same1, Some x, Unchanged => if L.beq x x1 then Same1 else if L.beq x x2 then CC (PTree.Node111 l1 x2 r1) else CC (PTree.Node111 l1 x r1)
+  | Same1, Some x, Chempty => if L.beq x x1 then CC (PTree.Node110 l1 x1) else if L.beq x x2 then CC (PTree.Node110 l1 x2) else CC (PTree.Node110 l1 x)
+  | Same1, Some x, Changed r => if L.beq x x1 then CC (PTree.Node111 l1 x1 r) else if L.beq x x2 then CC (PTree.Node111 l1 x2 r) else CC (PTree.Node111 l1 x r)
+  | Same2, None, Unchanged => CC (PTree.Node101 l2 r1)
+  | Same2, None, Chempty => CC (PTree.Node100 l2)
+  | Same2, None, Changed r => CC (PTree.Node101 l2 r)
+  | Same2, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node111 l2 x1 r1) else if L.beq x x2 then CC (PTree.Node111 l2 x2 r1) else CC (PTree.Node111 l2 x r1)
+  | Same2, Some x, Chempty => if L.beq x x1 then CC (PTree.Node110 l2 x1) else if L.beq x x2 then Same2 else CC (PTree.Node110 l2 x)
+  | Same2, Some x, Changed r => if L.beq x x1 then CC (PTree.Node111 l2 x1 r) else if L.beq x x2 then CC (PTree.Node111 l2 x2 r) else CC (PTree.Node111 l2 x r)
+  | CC0, None, Unchanged => CC (PTree.Node001 r1)
+  | CC0, None, Chempty => CC0
+  | CC0, None, Changed r => CC (PTree.Node001 r)
+  | CC0, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node011 x1 r1) else if L.beq x x2 then CC (PTree.Node011 x2 r1) else CC (PTree.Node011 x r1)
+  | CC0, Some x, Chempty => if L.beq x x1 then CC (PTree.Node010 x1) else if L.beq x x2 then CC (PTree.Node010 x2) else CC (PTree.Node010 x)
+  | CC0, Some x, Changed r => if L.beq x x1 then CC (PTree.Node011 x1 r) else if L.beq x x2 then CC (PTree.Node011 x2 r) else CC (PTree.Node011 x r)
+  | CC l, None, Unchanged => CC (PTree.Node101 l r1)
+  | CC l, None, Chempty => CC (PTree.Node100 l)
+  | CC l, None, Changed r => CC (PTree.Node101 l r)
+  | CC l, Some x, Unchanged => if L.beq x x1 then CC (PTree.Node111 l x1 r1) else if L.beq x x2 then CC (PTree.Node111 l x2 r1) else CC (PTree.Node111 l x r1)
+  | CC l, Some x, Chempty => if L.beq x x1 then CC (PTree.Node110 l x1) else if L.beq x x2 then CC (PTree.Node110 l x2) else CC (PTree.Node110 l x)
+  | CC l, Some x, Changed r => if L.beq x x1 then CC (PTree.Node111 l x1 r) else if L.beq x x2 then CC (PTree.Node111 l x2 r) else CC (PTree.Node111 l x r)
+  end
+ | PTree.Node111 l1 x1 r1, PTree.Node111 l2 x2 r2 =>
+  match xcombine l1 l2, f (Some x1) (Some x2), xcombine r1 r2 with
+  | Same, None, Same => CC (PTree.Node101 l1 r1)
+  | Same, None, Same1 => CC (PTree.Node101 l1 r1)
+  | Same, None, Same2 => CC (PTree.Node101 l2 r2)
+  | Same, None, CC0 => CC (PTree.Node100 l1)
+  | Same, None, CC r => CC (PTree.Node101 l2 r)
+  | Same, Some x, Same => if L.beq x x1 then Same1 else if L.beq x x2 then Same2 else CC (PTree.Node111 l2 x r2)
+  | Same, Some x, Same1 => if L.beq x x1 then Same1 else if L.beq x x2 then CC (PTree.Node111 l2 x2 r1) else CC (PTree.Node111 l1 x r1)
+  | Same, Some x, Same2 => if L.beq x x1 then CC (PTree.Node111 l2 x1 r2) else if L.beq x x2 then Same2 else CC (PTree.Node111 l2 x r2)
+  | Same, Some x, CC0 => if L.beq x x1 then CC (PTree.Node110 l2 x1) else if L.beq x x2 then CC (PTree.Node110 l2 x2) else CC (PTree.Node110 l2 x)
+  | Same, Some x, CC r => if L.beq x x1 then CC (PTree.Node111 l2 x1 r) else if L.beq x x2 then CC (PTree.Node111 l2 x2 r) else CC (PTree.Node111 l2 x r)
+  | Same1, None, Same => CC (PTree.Node101 l1 r1)
+  | Same1, None, Same1 => CC (PTree.Node101 l1 r1)
+  | Same1, None, Same2 => CC (PTree.Node101 l1 r2)
+  | Same1, None, CC0 => CC (PTree.Node100 l1)
+  | Same1, None, CC r => CC (PTree.Node101 l1 r)
+  | Same1, Some x, Same => if L.beq x x1 then Same1 else if L.beq x x2 then CC (PTree.Node111 l1 x2 r2) else CC (PTree.Node111 l1 x r2)
+  | Same1, Some x, Same1 => if L.beq x x1 then Same1 else if L.beq x x2 then CC (PTree.Node111 l1 x2 r1) else CC (PTree.Node111 l1 x r1)
+  | Same1, Some x, Same2 => if L.beq x x1 then CC (PTree.Node111 l1 x1 r2) else if L.beq x x2 then CC (PTree.Node111 l1 x2 r2) else CC (PTree.Node111 l1 x r2)
+  | Same1, Some x, CC0 => if L.beq x x1 then CC (PTree.Node110 l1 x1) else if L.beq x x2 then CC (PTree.Node110 l1 x2) else CC (PTree.Node110 l1 x)
+  | Same1, Some x, CC r => if L.beq x x1 then CC (PTree.Node111 l1 x1 r) else if L.beq x x2 then CC (PTree.Node111 l1 x2 r) else CC (PTree.Node111 l1 x r)
+  | Same2, None, Same => CC (PTree.Node101 l2 r2)
+  | Same2, None, Same1 => CC (PTree.Node101 l2 r1)
+  | Same2, None, Same2 => CC (PTree.Node101 l2 r2)
+  | Same2, None, CC0 =>CC (PTree.Node100 l2)
+  | Same2, None, CC r => CC (PTree.Node101 l2 r)
+  | Same2, Some x, Same => if L.beq x x1 then CC (PTree.Node111 l2 x1 r2) else if L.beq x x2 then Same2 else CC (PTree.Node111 l2 x r2)
+  | Same2, Some x, Same1 => if L.beq x x1 then CC (PTree.Node111 l2 x1 r1) else if L.beq x x2 then CC (PTree.Node111 l2 x2 r1) else CC (PTree.Node111 l2 x r1)
+  | Same2, Some x, Same2 => if L.beq x x1 then CC (PTree.Node111 l2 x1 r2) else if L.beq x x2 then Same2 else CC (PTree.Node111 l2 x r2)
+  | Same2, Some x, CC0 => if L.beq x x1 then CC (PTree.Node110 l2 x1) else if L.beq x x2 then CC (PTree.Node110 l2 x2) else CC (PTree.Node110 l2 x)
+  | Same2, Some x, CC r => if L.beq x x1 then CC (PTree.Node111 l2 x1 r) else if L.beq x x2 then CC (PTree.Node111 l2 x2 r) else CC (PTree.Node111 l2 x r)
+  | CC0, None, Same => CC (PTree.Node001 r2)
+  | CC0, None, Same1 => CC (PTree.Node001 r1)
+  | CC0, None, Same2 => CC (PTree.Node001 r2)
+  | CC0, None, CC0 => CC0
+  | CC0, None, CC r => CC (PTree.Node001 r)
+  | CC0, Some x, Same => if L.beq x x1 then CC (PTree.Node011 x1 r2) else if L.beq x x2 then CC (PTree.Node011 x2 r2) else CC (PTree.Node011 x r2)
+  | CC0, Some x, Same1 => if L.beq x x1 then CC (PTree.Node011 x1 r1) else if L.beq x x2 then CC (PTree.Node011 x2 r1) else CC (PTree.Node011 x r1)
+  | CC0, Some x, Same2 => if L.beq x x1 then CC (PTree.Node011 x1 r2) else if L.beq x x2 then CC (PTree.Node011 x2 r2) else CC (PTree.Node011 x r2)
+  | CC0, Some x, CC0 => if L.beq x x1 then CC (PTree.Node010 x1) else if L.beq x x2 then CC (PTree.Node010 x2) else CC (PTree.Node010 x)
+  | CC0, Some x, CC r => if L.beq x x1 then CC (PTree.Node011 x1 r) else if L.beq x x2 then CC (PTree.Node011 x2 r) else CC (PTree.Node011 x r)
+  | CC l, None, Same => CC (PTree.Node101 l r2)
+  | CC l, None, Same1 => CC (PTree.Node101 l r1)
+  | CC l, None, Same2 => CC (PTree.Node101 l r2)
+  | CC l, None, CC0 => CC (PTree.Node100 l)
+  | CC l, None, CC r => CC (PTree.Node101 l r)
+  | CC l, Some x, Same => if L.beq x x1 then CC (PTree.Node111 l x1 r2) else if L.beq x x2 then CC (PTree.Node111 l x2 r2) else CC (PTree.Node111 l x r2)
+  | CC l, Some x, Same1 => if L.beq x x1 then CC (PTree.Node111 l x1 r1) else if L.beq x x2 then CC (PTree.Node111 l x2 r1) else CC (PTree.Node111 l x r1)
+  | CC l, Some x, Same2 => if L.beq x x1 then CC (PTree.Node111 l x1 r2) else if L.beq x x2 then CC (PTree.Node111 l x2 r2) else CC (PTree.Node111 l x r2)
+  | CC l, Some x, CC0 => if L.beq x x1 then CC (PTree.Node110 l x1) else if L.beq x x2 then CC (PTree.Node110 l x2) else CC (PTree.Node110 l x)
+  | CC l, Some x, CC r => if L.beq x x1 then CC (PTree.Node111 l x1 r) else if L.beq x x2 then CC (PTree.Node111 l x2 r) else CC (PTree.Node111 l x r)
+  end
+ end.
+
+Lemma xcombine_l_combine': 
+  forall m,
+ PTree.xcombine_l f (PTree.Nodes m) = PTree.combine' f m PTree.Empty.
+Proof.
+intros.
+rewrite PTree.combine'_Empty.
+reflexivity.
+Qed.
+
+Lemma combine_commut_f     : forall m1 m2 : PTree.t L.t,
+       PTree.combine f m1 m2 = PTree.combine (fun i j : option L.t => f j i) m2 m1.
+Proof. intros. apply (PTree.combine_commut f  (fun i j => f j i) f_none_none); reflexivity.
+Qed.
+
+
+Lemma xcombine_r_combine': 
+  forall m,
+ PTree.xcombine_r f (PTree.Nodes m) = PTree.combine' (flip f) m PTree.Empty.
+Proof. intros. 
+fold (PTree.combine (flip f) (PTree.Nodes m) PTree.Empty).
+rewrite <- combine_commut_f; auto.
+Qed.
 
 Lemma xcombine_eq:
   forall m1 m2,
   match xcombine m1 m2 with
-  | Same => tree_eq m1 (PTree.combine f m1 m2) /\ tree_eq m2 (PTree.combine f m1 m2)
-  | Same1 => tree_eq m1 (PTree.combine f m1 m2)
-  | Same2 => tree_eq m2 (PTree.combine f m1 m2)
-  | CC m => tree_eq m (PTree.combine f m1 m2)
+  | Same => tree_eq (PTree.Nodes m1) (PTree.combine f (PTree.Nodes m1) (PTree.Nodes m2))
+                 /\ tree_eq (PTree.Nodes m2) (PTree.combine f (PTree.Nodes m1) (PTree.Nodes m2))
+  | Same1 => tree_eq (PTree.Nodes m1) (PTree.combine f (PTree.Nodes m1) (PTree.Nodes m2))
+  | Same2 => tree_eq (PTree.Nodes m2) (PTree.combine f (PTree.Nodes m1) (PTree.Nodes m2))
+  | CC0 => tree_eq PTree.Empty  (PTree.combine f (PTree.Nodes m1) (PTree.Nodes m2))
+  | CC m => tree_eq (PTree.Nodes m) (PTree.combine f (PTree.Nodes m1) (PTree.Nodes m2))
   end.
 Proof.
-Opaque combine_l combine_r PTree.xcombine_l PTree.xcombine_r.
-  induction m1; destruct m2; simpl.
-  split; apply tree_eq_refl.
-  generalize (combine_r_eq (PTree.Node m2_1 o m2_2)).
-  destruct (combine_r (PTree.Node m2_1 o m2_2)); auto.
-  generalize (combine_l_eq (PTree.Node m1_1 o m1_2)).
-  destruct (combine_l (PTree.Node m1_1 o m1_2)); auto.
-  generalize (IHm1_1 m2_1) (IHm1_2 m2_2).
-  destruct (xcombine m1_1 m2_1);
-  destruct (xcombine m1_2 m2_2); auto with combine;
-  intuition; case_eq (opt_beq (f o o0) o); case_eq (opt_beq (f o o0) o0); auto with combine.
+(*Opaque combine_l combine_r PTree.xcombine_l PTree.xcombine_r. *)
+  induction m1 as [r1 IHr1 | x1 | x1 r1 IHr1 | l1 IHl1 | l1 IHl1 r1 IHr1 | l1 IHl1 x1 | l1 IHl1 x1 r1 IHr1 ];
+  destruct m2 as [r2|x2|x2 r2|l2|l2 r2|l2 x2|l2 x2 r2];
+  unfold xcombine; fold xcombine.
+all: try solve [
+
+repeat match goal with 
+|  H: tree_eq _ _ /\ tree_eq _ _ |- _ => destruct H 
+| |- context [xcombine ?a ?b] =>
+  match goal with IH: forall m2, match xcombine a m2 with _ => _ end |- _ =>
+     specialize (IH b); destruct (xcombine a b) eqn:?H
+  end
+| |- context [f ?a ?b] => destruct (f a b) eqn:Hf
+| |- context [combine_l ?a] =>
+  match goal with
+  | IH: forall m2, match xcombine a m2 with _ => _ end |- _ =>
+     clear IH; destruct (combine_l a) eqn:IH; apply combine_l_eq in IH
+  | |- _ =>  let H := fresh in destruct (combine_l a) eqn:?H; apply combine_l_eq in H
+  end
+| |- context [combine_r ?a] =>
+  match goal with
+  | IH: forall m2, match xcombine a m2 with _ => _ end |- _ =>
+     clear IH; destruct (combine_r a) eqn:IH; apply combine_r_eq in IH
+  | |- _ =>  let H := fresh in destruct (combine_r a) eqn:?H; apply combine_r_eq in H
+  end
+
+| |- context [L.beq ?a ?b] => 
+  let H := fresh in 
+   destruct (L.beq a b) eqn:H; [apply L.beq_correct in H | clear H]
+| |- tree_eq _ _ /\ tree_eq _ _ => split
+end;
+ try solve [
+intro i; destruct i;
+ repeat match goal with H: tree_eq _ _ |- _ => specialize (H i) end;
+ unfold PTree.get in *;
+ unfold PTree.get'; fold @PTree.get';
+ try match goal with |- opt_eq (PTree.get' ?i ?a) _ => 
+   match goal with H: opt_eq (PTree.get' i a) _ |- _ => eapply opt_eq_trans; [apply H | clear H] end
+ end;
+
+ unfold PTree.combine in *;
+ simpl PTree.combine'; unfold PTree.Node;
+ rewrite ?Hf, ?f_none_none;
+ repeat change (PTree.xcombine' _ ?r) with (PTree.xcombine_r f (PTree.Nodes r));
+ rewrite ?xcombine_l_combine', ?xcombine_r_combine' in *;
+ repeat match goal with |- context [PTree.combine' ?g ?a ?b] =>
+  destruct (PTree.combine' g a b) eqn:?H
+ end;
+ try apply opt_eq_refl;
+ auto; 
+ try apply L.eq_refl;
+ try (apply L.eq_sym; auto);
+ try match goal with 
+  | H: tree_eq (PTree.Nodes _) PTree.Empty |- _ => contradiction (tree_eq_Nodes_not_Empty H) 
+  end
+]
+].
 Qed.
 
 Definition combine (m1 m2: PTree.t L.t) : PTree.t L.t :=
-  match xcombine m1 m2 with
-  | Same|Same1 => m1
-  | Same2 => m2
-  | CC m => m
+  match m1, m2 with
+  | PTree.Empty, PTree.Empty => PTree.Empty
+  | PTree.Empty, PTree.Nodes m2' => 
+       match combine_r m2' with
+       | Unchanged => m2 
+       | Chempty => PTree.Empty 
+       | Changed m => PTree.Nodes m
+      end
+  | PTree.Nodes m1', PTree.Empty => 
+       match combine_l m1' with
+       | Unchanged => m1 
+       | Chempty => PTree.Empty 
+       | Changed m => PTree.Nodes m
+      end
+  | PTree.Nodes m1', PTree.Nodes m2' =>
+    match xcombine m1' m2' with
+     | Same|Same1 => m1
+     | Same2 => m2
+     | CC0 => PTree.Empty
+     | CC m => PTree.Nodes m
+     end
   end.
 
 Lemma gcombine:
   forall m1 m2 i, opt_eq (PTree.get i (combine m1 m2)) (f (PTree.get i m1) (PTree.get i m2)).
 Proof.
   intros.
-  assert (tree_eq (combine m1 m2) (PTree.combine f m1 m2)).
-  unfold combine.
-  generalize (xcombine_eq m1 m2).
-  destruct (xcombine m1 m2); tauto.
+  assert (tree_eq (combine m1 m2) (PTree.combine f m1 m2)). {
+    unfold combine.
+    destruct m1, m2.
+    apply tree_eq_refl.
+    destruct (combine_r t0) eqn:H; apply combine_r_eq in H; apply H.
+    destruct (combine_l t0) eqn:H; apply combine_l_eq in H.
+    rewrite xcombine_l_combine' in H. apply H.
+    rewrite xcombine_l_combine' in H. apply H.
+    rewrite xcombine_l_combine' in H. apply H.
+    pose proof (xcombine_eq t0 t1).
+    destruct (xcombine t0 t1); apply H.
+  }
   eapply opt_eq_trans. apply H. rewrite PTree.gcombine; auto. apply opt_eq_refl.
 Qed.
 
@@ -525,7 +1811,7 @@ Definition top := Top_except (PTree.empty L.t).
 
 Lemma get_top: forall p, get p top = L.top.
 Proof.
-  unfold top; intros; simpl. rewrite PTree.gempty. auto.
+  unfold top; intros; simpl. auto.
 Qed.
 
 Lemma ge_top: forall x, ge top x.
